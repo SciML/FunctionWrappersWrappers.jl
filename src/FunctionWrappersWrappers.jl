@@ -6,6 +6,7 @@ export FunctionWrappersWrapper
 
 struct FunctionWrappersWrapper{FW}
   fw::FW
+  original::Any
 end
 (fww::FunctionWrappersWrapper{FW})(args::Vararg{Any,K}) where {FW,K} = _call(fww.fw, args)
 
@@ -17,7 +18,7 @@ function FunctionWrappersWrapper(f::F, argtypes::Tuple{Vararg{Any,K}}, rettypes:
   fwt = map(argtypes, rettypes) do A, R
     FunctionWrappers.FunctionWrapper{R,A}(f)
   end
-  FunctionWrappersWrapper(fwt)
+  FunctionWrappersWrapper(fwt,f)
 end
 
 end
