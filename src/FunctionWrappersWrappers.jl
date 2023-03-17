@@ -9,14 +9,7 @@ struct FunctionWrappersWrapper{FW,FB}
   fw::FW
 end
 
-function Base.show(io::IO,
-                    t::Type{FunctionWrappersWrapper{FW,FB}}) where {FW,FB}
-    if TruncatedStacktraces.VERBOSE[]
-        print(io, "FunctionWrappersWrapper{$FW,$FB}")
-    else
-        print(io, "FunctionWrappersWrapper{…}")
-    end
-end
+TruncatedStacktraces.@truncate_stacktrace FunctionWrappersWrapper
 
 (fww::FunctionWrappersWrapper{FW,FB})(args::Vararg{Any,K}) where {FW,K,FB} = _call(fww.fw, args, fww)
 
