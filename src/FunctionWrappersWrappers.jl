@@ -3,7 +3,7 @@ module FunctionWrappersWrappers
 using FunctionWrappers
 import TruncatedStacktraces
 
-export FunctionWrappersWrapper
+export FunctionWrappersWrapper, unwrap, wrapped_signatures, wrapped_return_types
 
 struct FunctionWrappersWrapper{FW, FB}
     fw::FW
@@ -47,5 +47,71 @@ function FunctionWrappersWrapper(
     end
     FunctionWrappersWrapper{typeof(fwt), FB}(fwt)
 end
+
+"""
+    unwrap(fww::FunctionWrappersWrapper)
+
+Return the original function that was wrapped. This is useful for debugging
+wrapped functions - you can use the returned function with debugging tools
+like Debugger.jl or Infiltrator.jl.
+
+# Example
+
+```julia
+using FunctionWrappersWrappers
+
+# Create a wrapped function
+fww = FunctionWrappersWrapper(sin, (Tuple{Float64},), (Float64,))
+
+# Get the original function for debugging
+f = unwrap(fww)  # Returns sin
+
+# Now you can debug with Debugger.jl:
+# using Debugger
+# @enter f(0.5)
+
+# Or use Infiltrator.jl in your original function definition
+```
+
+See also: [`wrapped_signatures`](@ref), [`wrapped_return_types`](@ref)
+"""
+unwrap(fww::FunctionWrappersWrapper) = first(fww.fw).obj[]
+
+"""
+    wrapped_signatures(fww::FunctionWrappersWrapper)
+
+Return a tuple of the argument type signatures that the `FunctionWrappersWrapper`
+can dispatch on. Each element is a `Tuple` type representing the argument types.
+
+# Example
+
+```julia
+using FunctionWrappersWrappers
+
+fww = FunctionWrappersWrapper(+, (Tuple{Float64, Float64}, Tuple{Int, Int}), (Float64, Int))
+wrapped_signatures(fww)  # Returns (Tuple{Float64, Float64}, Tuple{Int, Int})
+```
+
+See also: [`unwrap`](@ref), [`wrapped_return_types`](@ref)
+"""
+wrapped_signatures(fww::FunctionWrappersWrapper) = map(fw -> typeof(fw).parameters[2], fww.fw)
+
+"""
+    wrapped_return_types(fww::FunctionWrappersWrapper)
+
+Return a tuple of the return types for each wrapped function signature.
+
+# Example
+
+```julia
+using FunctionWrappersWrappers
+
+fww = FunctionWrappersWrapper(+, (Tuple{Float64, Float64}, Tuple{Int, Int}), (Float64, Int))
+wrapped_return_types(fww)  # Returns (Float64, Int64)
+```
+
+See also: [`unwrap`](@ref), [`wrapped_signatures`](@ref)
+"""
+wrapped_return_types(fww::FunctionWrappersWrapper) = map(fw -> typeof(fw).parameters[1], fww.fw)
 
 end
