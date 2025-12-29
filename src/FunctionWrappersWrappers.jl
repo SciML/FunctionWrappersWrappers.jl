@@ -94,7 +94,9 @@ wrapped_signatures(fww)  # Returns (Tuple{Float64, Float64}, Tuple{Int, Int})
 
 See also: [`unwrap`](@ref), [`wrapped_return_types`](@ref)
 """
-wrapped_signatures(fww::FunctionWrappersWrapper) = map(fw -> typeof(fw).parameters[2], fww.fw)
+function wrapped_signatures(fww::FunctionWrappersWrapper)
+    map(fw -> typeof(fw).parameters[2], fww.fw)
+end
 
 """
     wrapped_return_types(fww::FunctionWrappersWrapper)
@@ -112,6 +114,8 @@ wrapped_return_types(fww)  # Returns (Float64, Int64)
 
 See also: [`unwrap`](@ref), [`wrapped_signatures`](@ref)
 """
-wrapped_return_types(fww::FunctionWrappersWrapper) = map(fw -> typeof(fw).parameters[1], fww.fw)
+function wrapped_return_types(fww::FunctionWrappersWrapper)
+    map(fw -> typeof(fw).parameters[1], fww.fw)
+end
 
 end
