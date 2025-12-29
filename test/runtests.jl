@@ -35,7 +35,8 @@ end
     end
 
     # Test with multiple signatures
-    fwplus = FunctionWrappersWrapper(+, (Tuple{Float64, Float64}, Tuple{Int, Int}), (Float64, Int))
+    fwplus = FunctionWrappersWrapper(+, (Tuple{Float64, Float64}, Tuple{Int, Int}), (
+        Float64, Int))
 
     @testset "unwrap with multiple signatures" begin
         f = unwrap(fwplus)
@@ -55,7 +56,8 @@ end
 
     # Test with a custom function
     my_func(x) = x^2
-    fwcustom = FunctionWrappersWrapper(my_func, (Tuple{Float64}, Tuple{Int}), (Float64, Int))
+    fwcustom = FunctionWrappersWrapper(my_func, (Tuple{Float64}, Tuple{Int}), (
+        Float64, Int))
 
     @testset "unwrap with custom function" begin
         f = unwrap(fwcustom)
