@@ -118,4 +118,36 @@ function wrapped_return_types(fww::FunctionWrappersWrapper)
     map(fw -> typeof(fw).parameters[1], fww.fw)
 end
 
+using PrecompileTools
+
+@setup_workload begin
+    @compile_workload begin
+        # Precompile common use cases with Float64 and Int types
+        # These are the most common type combinations for numerical computations
+
+        # Binary operation with multiple type combinations (common pattern)
+        fw_binary = FunctionWrappersWrapper(
+            +,
+            (Tuple{Float64, Float64}, Tuple{Int, Int}),
+            (Float64, Int)
+        )
+        fw_binary(1.0, 2.0)
+        fw_binary(1, 2)
+
+        # Unary operation with multiple types (common pattern)
+        fw_unary = FunctionWrappersWrapper(
+            abs,
+            (Tuple{Float64}, Tuple{Int}),
+            (Float64, Int)
+        )
+        fw_unary(1.0)
+        fw_unary(1)
+
+        # Precompile introspection functions
+        unwrap(fw_unary)
+        wrapped_signatures(fw_binary)
+        wrapped_return_types(fw_binary)
+    end
+end
+
 end
