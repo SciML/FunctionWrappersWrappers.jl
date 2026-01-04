@@ -12,16 +12,20 @@ end
 TruncatedStacktraces.@truncate_stacktrace FunctionWrappersWrapper
 
 function (fww::FunctionWrappersWrapper{FW, FB})(args::Vararg{Any, K}) where {FW, K, FB}
-    _call(fww.fw, args, fww)
+    return _call(fww.fw, args, fww)
 end
 
-function _call(fw::Tuple{FunctionWrappers.FunctionWrapper{R, A}, Vararg},
-        arg::A, fww::FunctionWrappersWrapper) where {R, A}
-    first(fw)(arg...)
+function _call(
+        fw::Tuple{FunctionWrappers.FunctionWrapper{R, A}, Vararg},
+        arg::A, fww::FunctionWrappersWrapper
+    ) where {R, A}
+    return first(fw)(arg...)
 end
-function _call(fw::Tuple{FunctionWrappers.FunctionWrapper{R, A1}, Vararg},
-        arg::A2, fww::FunctionWrappersWrapper) where {R, A1, A2}
-    _call(Base.tail(fw), arg, fww)
+function _call(
+        fw::Tuple{FunctionWrappers.FunctionWrapper{R, A1}, Vararg},
+        arg::A2, fww::FunctionWrappersWrapper
+    ) where {R, A1, A2}
+    return _call(Base.tail(fw), arg, fww)
 end
 
 const NO_FUNCTIONWRAPPER_FOUND_MESSAGE = "No matching function wrapper was found!"
@@ -29,23 +33,24 @@ const NO_FUNCTIONWRAPPER_FOUND_MESSAGE = "No matching function wrapper was found
 struct NoFunctionWrapperFoundError <: Exception end
 
 function Base.showerror(io::IO, e::NoFunctionWrapperFoundError)
-    print(io, NO_FUNCTIONWRAPPER_FOUND_MESSAGE)
+    return print(io, NO_FUNCTIONWRAPPER_FOUND_MESSAGE)
 end
 
 function _call(::Tuple{}, arg, fww::FunctionWrappersWrapper{<:Any, false})
     throw(NoFunctionWrapperFoundError())
 end
 function _call(::Tuple{}, arg, fww::FunctionWrappersWrapper{<:Any, true})
-    first(fww.fw).obj[](arg...)
+    return first(fww.fw).obj[](arg...)
 end
 
 function FunctionWrappersWrapper(
         f::F, argtypes::Tuple{Vararg{Any, K}}, rettypes::Tuple{Vararg{DataType, K}},
-        fallback::Val{FB} = Val{false}()) where {F, K, FB}
+        fallback::Val{FB} = Val{false}()
+    ) where {F, K, FB}
     fwt = map(argtypes, rettypes) do A, R
         FunctionWrappers.FunctionWrapper{R, A}(f)
     end
-    FunctionWrappersWrapper{typeof(fwt), FB}(fwt)
+    return FunctionWrappersWrapper{typeof(fwt), FB}(fwt)
 end
 
 """
@@ -95,7 +100,7 @@ wrapped_signatures(fww)  # Returns (Tuple{Float64, Float64}, Tuple{Int, Int})
 See also: [`unwrap`](@ref), [`wrapped_return_types`](@ref)
 """
 function wrapped_signatures(fww::FunctionWrappersWrapper)
-    map(fw -> typeof(fw).parameters[2], fww.fw)
+    return map(fw -> typeof(fw).parameters[2], fww.fw)
 end
 
 """
@@ -115,7 +120,7 @@ wrapped_return_types(fww)  # Returns (Float64, Int64)
 See also: [`unwrap`](@ref), [`wrapped_signatures`](@ref)
 """
 function wrapped_return_types(fww::FunctionWrappersWrapper)
-    map(fw -> typeof(fw).parameters[1], fww.fw)
+    return map(fw -> typeof(fw).parameters[1], fww.fw)
 end
 
 using PrecompileTools
