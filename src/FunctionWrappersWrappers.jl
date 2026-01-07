@@ -44,7 +44,7 @@ function _call(::Tuple{}, arg, fww::FunctionWrappersWrapper{<:Any, true})
 end
 
 function FunctionWrappersWrapper(
-        f::F, argtypes::Tuple{Vararg{Any, K}}, rettypes::Tuple{Vararg{DataType, K}},
+        f::F, argtypes::Tuple{Vararg{Any, K}}, rettypes::Tuple{Vararg{Type, K}},
         fallback::Val{FB} = Val{false}()
     ) where {F, K, FB}
     fwt = map(argtypes, rettypes) do A, R
