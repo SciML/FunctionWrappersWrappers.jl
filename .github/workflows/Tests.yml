@@ -26,7 +26,7 @@ jobs:
         version:
           - '1'
           - 'lts'
-          - 'nightly'
+          - 'pre'
         arch:
           - x64
     uses: "SciML/.github/.github/workflows/tests.yml@v1"
