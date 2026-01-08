@@ -51,6 +51,8 @@ end
     @test @inferred(fwexp2(4.0)) === 16.0
     @test @inferred(fwexp2(4.0f0)) === 16.0f0
     @test @inferred(fwexp2(4)) === 16.0
+end
+
 @testset "Introspection functions" begin
     # Test with a simple function
     fwsin = FunctionWrappersWrapper(sin, (Tuple{Float64},), (Float64,))
