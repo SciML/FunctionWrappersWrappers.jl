@@ -1,13 +1,16 @@
-using Test
+using Test, Pkg
 
 const GROUP = get(ENV, "GROUP", "All")
 
-@testset "FunctionWrappersWrappers.jl" begin
-    if GROUP == "All" || GROUP == "Core"
+if GROUP == "All" || GROUP == "Core"
+    @testset "FunctionWrappersWrappers.jl" begin
         include("basictests.jl")
     end
+end
 
-    if GROUP == "All" || GROUP == "nopre"
-        include("jet_tests.jl")
-    end
+if GROUP == "nopre"
+    Pkg.activate("nopre")
+    Pkg.develop(PackageSpec(path = dirname(@__DIR__)))
+    Pkg.instantiate()
+    include("nopre/jet_tests.jl")
 end
