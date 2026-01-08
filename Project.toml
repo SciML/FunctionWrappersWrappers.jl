@@ -9,11 +9,13 @@ TruncatedStacktraces = "781d530d-4396-4725-bb49-402e4bee1e77"
 
 [compat]
 FunctionWrappers = "1"
+JET = "0.9"
 TruncatedStacktraces = "1"
 julia = "1.6"
 
 [extras]
+JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["JET", "Test"]
