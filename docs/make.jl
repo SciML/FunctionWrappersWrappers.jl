@@ -1,8 +1,10 @@
 using FunctionWrappersWrappers
 using Documenter
 
-DocMeta.setdocmeta!(FunctionWrappersWrappers, :DocTestSetup,
-    :(using FunctionWrappersWrappers); recursive = true)
+DocMeta.setdocmeta!(
+    FunctionWrappersWrappers, :DocTestSetup,
+    :(using FunctionWrappersWrappers); recursive = true
+)
 
 makedocs(;
     modules = [FunctionWrappersWrappers],
