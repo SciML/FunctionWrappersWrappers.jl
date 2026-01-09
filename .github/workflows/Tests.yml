@@ -29,11 +29,11 @@ jobs:
         version:
           - '1'
           - 'lts'
-          - 'nightly'
+          - 'pre'
         arch:
           - x64
         exclude:
-          - version: 'nightly'
+          - version: 'pre'
             group: 'nopre'
     uses: "SciML/.github/.github/workflows/tests.yml@v1"
     with:
