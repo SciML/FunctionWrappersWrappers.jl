@@ -1,7 +1,7 @@
 name = "FunctionWrappersWrappers"
 uuid = "77dc65aa-8811-40c2-897b-53d922fa7daf"
 authors = ["Chris Elrod <elrodc@gmail.com> and contributors"]
-version = "0.1.4"
+version = "0.1.5"
 
 [deps]
 FunctionWrappers = "069b7b12-0de2-55c6-9aab-29f3d0a68a2e"
@@ -12,7 +12,7 @@ TruncatedStacktraces = "781d530d-4396-4725-bb49-402e4bee1e77"
 FunctionWrappers = "1"
 PrecompileTools = "1"
 TruncatedStacktraces = "1"
-julia = "1.6"
+julia = "1.10"
 
 [extras]
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
