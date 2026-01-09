@@ -29,7 +29,7 @@ jobs:
         version:
           - '1'
           - 'lts'
-          - 'nightly'
+          - 'pre'
         arch:
           - x64
         exclude:
