@@ -1,0 +1,96 @@
+using FunctionWrappersWrappers
+using Test
+
+@testset "FunctionWrappersWrappers.jl" begin
+    fwplus = FunctionWrappersWrapper(
+        +, (Tuple{Float64, Float64}, Tuple{Int, Int}), (
+            Float64, Int,
+        )
+    )
+    @test fwplus(4.0, 8.0) === 12.0
+    @test fwplus(4, 8) === 12
+
+    fwexp2 = FunctionWrappersWrapper(
+        exp2, (Tuple{Float64}, Tuple{Float32}, Tuple{Int}), (Float64, Float32, Float64)
+    )
+    @test fwexp2(4.0) === 16.0
+    @test fwexp2(4.0f0) === 16.0f0
+    @test fwexp2(4) === 16.0
+end
+
+@testset "Type inference" begin
+    # Test return type inference
+    fwplus = FunctionWrappersWrapper(
+        +, (Tuple{Float64, Float64}, Tuple{Int, Int}), (
+            Float64, Int,
+        )
+    )
+    @test @inferred(fwplus(4.0, 8.0)) === 12.0
+    @test @inferred(fwplus(4, 8)) === 12
+
+    fwexp2 = FunctionWrappersWrapper(
+        exp2, (Tuple{Float64}, Tuple{Float32}, Tuple{Int}), (Float64, Float32, Float64)
+    )
+    @test @inferred(fwexp2(4.0)) === 16.0
+    @test @inferred(fwexp2(4.0f0)) === 16.0f0
+    @test @inferred(fwexp2(4)) === 16.0
+end
+
+@testset "Introspection functions" begin
+    # Test with a simple function
+    fwsin = FunctionWrappersWrapper(sin, (Tuple{Float64},), (Float64,))
+
+    @testset "unwrap" begin
+        f = unwrap(fwsin)
+        @test f === sin
+        @test f(0.5) == sin(0.5)
+    end
+
+    @testset "wrapped_signatures" begin
+        sigs = wrapped_signatures(fwsin)
+        @test sigs == (Tuple{Float64},)
+    end
+
+    @testset "wrapped_return_types" begin
+        rets = wrapped_return_types(fwsin)
+        @test rets == (Float64,)
+    end
+
+    # Test with multiple signatures
+    fwplus = FunctionWrappersWrapper(
+        +, (Tuple{Float64, Float64}, Tuple{Int, Int}), (
+            Float64, Int,
+        )
+    )
+
+    @testset "unwrap with multiple signatures" begin
+        f = unwrap(fwplus)
+        @test f === +
+        @test f(1, 2) == 3
+    end
+
+    @testset "wrapped_signatures with multiple signatures" begin
+        sigs = wrapped_signatures(fwplus)
+        @test sigs == (Tuple{Float64, Float64}, Tuple{Int, Int})
+    end
+
+    @testset "wrapped_return_types with multiple signatures" begin
+        rets = wrapped_return_types(fwplus)
+        @test rets == (Float64, Int)
+    end
+
+    # Test with a custom function
+    my_func(x) = x^2
+    fwcustom = FunctionWrappersWrapper(
+        my_func, (Tuple{Float64}, Tuple{Int}), (
+            Float64, Int,
+        )
+    )
+
+    @testset "unwrap with custom function" begin
+        f = unwrap(fwcustom)
+        @test f === my_func
+        @test f(3) == 9
+        @test f(2.5) == 6.25
+    end
+end
