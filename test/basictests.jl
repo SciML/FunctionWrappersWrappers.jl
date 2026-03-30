@@ -19,7 +19,6 @@ using Test
 end
 
 @testset "Type inference" begin
-    # Test return type inference
     fwplus = FunctionWrappersWrapper(
         +, (Tuple{Float64, Float64}, Tuple{Int, Int}), (
             Float64, Int,
@@ -37,7 +36,6 @@ end
 end
 
 @testset "Introspection functions" begin
-    # Test with a simple function
     fwsin = FunctionWrappersWrapper(sin, (Tuple{Float64},), (Float64,))
 
     @testset "unwrap" begin
@@ -56,7 +54,6 @@ end
         @test rets == (Float64,)
     end
 
-    # Test with multiple signatures
     fwplus = FunctionWrappersWrapper(
         +, (Tuple{Float64, Float64}, Tuple{Int, Int}), (
             Float64, Int,
@@ -79,7 +76,6 @@ end
         @test rets == (Float64, Int)
     end
 
-    # Test with a custom function
     my_func(x) = x^2
     fwcustom = FunctionWrappersWrapper(
         my_func, (Tuple{Float64}, Tuple{Int}), (
@@ -93,4 +89,157 @@ end
         @test f(3) == 9
         @test f(2.5) == 6.25
     end
+end
+
+@testset "Fallback policies" begin
+    @testset "Strict" begin
+        fww = FunctionWrappersWrapper(
+            +, (Tuple{Float64, Float64},), (Float64,);
+            cache = NoCache(), policy = Strict()
+        )
+        @test fww(4.0, 8.0) === 12.0
+        @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError fww(4, 8)
+        @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError fww(
+            BigFloat(4), BigFloat(8)
+        )
+    end
+
+    @testset "AllowAll" begin
+        fww = FunctionWrappersWrapper(
+            +, (Tuple{Float64, Float64},), (Float64,);
+            cache = NoCache(), policy = AllowAll()
+        )
+        @test fww(4.0, 8.0) === 12.0
+        @test fww(4, 8) === 12
+        @test fww(4.0f0, 8.0f0) == 12.0f0
+        @test fww(BigFloat(4), BigFloat(8)) == BigFloat(12)
+    end
+
+    @testset "AllowNonIsBits" begin
+        fww = FunctionWrappersWrapper(
+            +, (Tuple{Float64, Float64},), (Float64,);
+            cache = NoCache(), policy = AllowNonIsBits()
+        )
+        @test fww(4.0, 8.0) === 12.0
+        # Float32 is isbits but doesn't match Float64 wrapper → error
+        @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError fww(4.0f0, 8.0f0)
+        # Int is isbits but doesn't match Float64 wrapper → error
+        @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError fww(4, 8)
+        # BigFloat is non-isbits → allowed
+        @test fww(BigFloat(4), BigFloat(8)) == BigFloat(12)
+    end
+
+    @testset "AllowNonIsBits with arrays" begin
+        f!(du, u) = (du[1] = u[1]^2; nothing)
+        fww = FunctionWrappersWrapper(
+            f!, (Tuple{Vector{Float64}, Vector{Float64}},), (Nothing,);
+            cache = NoCache(), policy = AllowNonIsBits()
+        )
+        du_f = [0.0]; u_f = [3.0]
+        fww(du_f, u_f)
+        @test du_f[1] === 9.0
+
+        # Float32 arrays: eltype is isbits but doesn't match → error
+        @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError fww(
+            Float32[0.0], Float32[3.0]
+        )
+
+        # BigFloat arrays: eltype is non-isbits → allowed
+        du_bf = BigFloat[0]; u_bf = BigFloat[3]
+        fww(du_bf, u_bf)
+        @test du_bf[1] == BigFloat(9)
+    end
+end
+
+@testset "Cache modes" begin
+    f!(du, u, p, t) = (du[1] = p[1] * u[1]; nothing)
+
+    @testset "NoCache" begin
+        fww = FunctionWrappersWrapper(
+            f!,
+            (Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Float64},),
+            (Nothing,);
+            cache = NoCache(), policy = AllowAll()
+        )
+        # Float64 match
+        du = [0.0]; u = [2.0]; p = [3.0]
+        fww(du, u, p, 0.0)
+        @test du[1] === 6.0
+
+        # BigFloat fallback (NoCache: 1 alloc per call)
+        du_bf = BigFloat[0]; u_bf = BigFloat[2]; p_bf = BigFloat[3]; t_bf = BigFloat(0)
+        fww(du_bf, u_bf, p_bf, t_bf)
+        @test du_bf[1] == BigFloat(6)
+    end
+
+    @testset "SingleCache" begin
+        fww = FunctionWrappersWrapper(
+            f!,
+            (Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Float64},),
+            (Nothing,);
+            cache = SingleCache(), policy = AllowAll()
+        )
+        du_bf = BigFloat[0]; u_bf = BigFloat[2]; p_bf = BigFloat[3]; t_bf = BigFloat(0)
+        # First call caches
+        fww(du_bf, u_bf, p_bf, t_bf)
+        @test du_bf[1] == BigFloat(6)
+        # Second call uses cache (0 alloc)
+        du_bf[1] = BigFloat(0)
+        fww(du_bf, u_bf, p_bf, t_bf)
+        @test du_bf[1] == BigFloat(6)
+    end
+
+    @testset "DictCache" begin
+        fww = FunctionWrappersWrapper(
+            f!,
+            (Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Float64},),
+            (Nothing,);
+            cache = DictCache(), policy = AllowAll()
+        )
+        du_bf = BigFloat[0]; u_bf = BigFloat[2]; p_bf = BigFloat[3]; t_bf = BigFloat(0)
+        fww(du_bf, u_bf, p_bf, t_bf)
+        @test du_bf[1] == BigFloat(6)
+
+        # Different type also works and caches separately
+        du_f32 = Float32[0]; u_f32 = Float32[2]; p_f32 = Float32[3]; t_f32 = Float32(0)
+        fww(du_f32, u_f32, p_f32, t_f32)
+        @test du_f32[1] === Float32(6)
+
+        # BigFloat still cached
+        du_bf[1] = BigFloat(0)
+        fww(du_bf, u_bf, p_bf, t_bf)
+        @test du_bf[1] == BigFloat(6)
+    end
+
+    @testset "SingleCache thrashing recovers" begin
+        fww = FunctionWrappersWrapper(
+            f!,
+            (Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Float64},),
+            (Nothing,);
+            cache = SingleCache(), policy = AllowAll()
+        )
+        du_bf = BigFloat[0]; u_bf = BigFloat[2]; p_bf = BigFloat[3]; t_bf = BigFloat(0)
+        du_f32 = Float32[0]; u_f32 = Float32[2]; p_f32 = Float32[3]; t_f32 = Float32(0)
+
+        # Alternate types — each call replaces the cache but still works
+        fww(du_bf, u_bf, p_bf, t_bf)
+        @test du_bf[1] == BigFloat(6)
+        fww(du_f32, u_f32, p_f32, t_f32)
+        @test du_f32[1] === Float32(6)
+        du_bf[1] = BigFloat(0)
+        fww(du_bf, u_bf, p_bf, t_bf)
+        @test du_bf[1] == BigFloat(6)
+    end
+end
+
+@testset "Default constructor uses SingleCache + AllowNonIsBits" begin
+    fww = FunctionWrappersWrapper(
+        +, (Tuple{Float64, Float64},), (Float64,)
+    )
+    # Float64 matches wrapper
+    @test fww(4.0, 8.0) === 12.0
+    # BigFloat is non-isbits → falls back
+    @test fww(BigFloat(4), BigFloat(8)) == BigFloat(12)
+    # Float32 is isbits mismatch → errors
+    @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError fww(4.0f0, 8.0f0)
 end
