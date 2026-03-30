@@ -16,7 +16,7 @@ abstract type AbstractCacheMode end
     NoCache()
 
 No caching — every fallback call goes through dynamic dispatch (`obj[](arg...)`),
-incurring 1 allocation per call. This is the legacy behavior when `fallback=Val{true}()`.
+incurring 1 allocation per call.
 """
 struct NoCache <: AbstractCacheMode end
 
@@ -46,7 +46,6 @@ abstract type AbstractFallbackPolicy end
     Strict()
 
 Never fall back — throw `NoFunctionWrapperFoundError` if no wrapper matches.
-This is the legacy behavior when `fallback=Val{false}()`.
 """
 struct Strict <: AbstractFallbackPolicy end
 
@@ -54,7 +53,6 @@ struct Strict <: AbstractFallbackPolicy end
     AllowAll()
 
 Always fall back to the original function when no wrapper matches.
-This is the legacy behavior when `fallback=Val{true}()`.
 """
 struct AllowAll <: AbstractFallbackPolicy end
 
@@ -98,7 +96,7 @@ controlled by the fallback policy `P` and cache mode `CS`.
 
 # Type parameters
 - `FW`: Tuple type of `FunctionWrapper`s
-- `P`: Fallback policy (`Strict`, `AllowAll`, `AllowNonIsBits`, or legacy `Bool`)
+- `P`: Fallback policy (`Strict`, `AllowAll`, or `AllowNonIsBits`)
 - `CS`: Cache storage type (`NoCacheStorage`, `SingleCacheStorage`, `DictCacheStorage`)
 """
 struct FunctionWrappersWrapper{FW, P, CS}
@@ -112,8 +110,6 @@ struct FunctionWrappersWrapper{FW, P, CS}
 end
 
 TruncatedStacktraces.@truncate_stacktrace FunctionWrappersWrapper
-
-# --- New API: cache + policy keywords ---
 
 """
     FunctionWrappersWrapper(f, argtypes, rettypes; cache=SingleCache(), policy=AllowNonIsBits())
@@ -141,31 +137,6 @@ function FunctionWrappersWrapper(
     return FunctionWrappersWrapper{typeof(fwt), typeof(policy), typeof(cs)}(fwt, cs)
 end
 
-# --- Legacy API: Val{true}/Val{false} fallback ---
-
-"""
-    FunctionWrappersWrapper(f, argtypes, rettypes, fallback::Val{FB})
-
-Legacy constructor. `Val{false}()` maps to `Strict()` with `NoCache()`.
-`Val{true}()` maps to `AllowAll()` with `NoCache()` (preserving the old
-1-alloc-per-call behavior).
-"""
-function FunctionWrappersWrapper(
-        f::F, argtypes::Tuple{Vararg{Any, K}}, rettypes::Tuple{Vararg{Type, K}},
-        fallback::Val{FB}
-    ) where {F, K, FB}
-    fwt = map(argtypes, rettypes) do A, R
-        FunctionWrappers.FunctionWrapper{R, A}(f)
-    end
-    policy = FB ? AllowAll : Strict
-    return FunctionWrappersWrapper{typeof(fwt), policy, NoCacheStorage}(fwt, NoCacheStorage())
-end
-
-# Legacy: direct type parameter construction with Bool FB (used by DiffEqBase)
-function FunctionWrappersWrapper{FW, FB}(fw::FW) where {FW, FB}
-    policy = FB ? AllowAll : Strict
-    return FunctionWrappersWrapper{FW, policy, NoCacheStorage}(fw, NoCacheStorage())
-end
 
 # ============================================================================
 # Call dispatch — entry point

@@ -91,39 +91,6 @@ end
     end
 end
 
-@testset "Legacy API (Val{true}/Val{false})" begin
-    fwplus = FunctionWrappersWrapper(
-        +, (Tuple{Float64, Float64}, Tuple{Int, Int}), (Float64, Int), Val{false}()
-    )
-    @test fwplus(4.0, 8.0) === 12.0
-    @test fwplus(4, 8) === 12
-    @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError fwplus(4.0f0, 8.0f0)
-
-    fwplus_fb = FunctionWrappersWrapper(
-        +, (Tuple{Float64, Float64}, Tuple{Int, Int}), (Float64, Int), Val{true}()
-    )
-    @test fwplus_fb(4.0, 8.0) === 12.0
-    @test fwplus_fb(4, 8) === 12
-    @test fwplus_fb(4.0f0, 8.0f0) == 12.0f0  # fallback to original function
-end
-
-@testset "Legacy FW{FW,Bool} constructor" begin
-    using FunctionWrappers
-    fw1 = FunctionWrappers.FunctionWrapper{Float64, Tuple{Float64, Float64}}(+)
-    fw2 = FunctionWrappers.FunctionWrapper{Int, Tuple{Int, Int}}(+)
-    fwt = (fw1, fw2)
-
-    fww_strict = FunctionWrappersWrapper{typeof(fwt), false}(fwt)
-    @test fww_strict(4.0, 8.0) === 12.0
-    @test fww_strict(4, 8) === 12
-    @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError fww_strict(4.0f0, 8.0f0)
-
-    fww_fb = FunctionWrappersWrapper{typeof(fwt), true}(fwt)
-    @test fww_fb(4.0, 8.0) === 12.0
-    @test fww_fb(4, 8) === 12
-    @test fww_fb(4.0f0, 8.0f0) == 12.0f0
-end
-
 @testset "Fallback policies" begin
     @testset "Strict" begin
         fww = FunctionWrappersWrapper(
