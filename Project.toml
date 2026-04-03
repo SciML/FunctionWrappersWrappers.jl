@@ -8,15 +8,30 @@ FunctionWrappers = "069b7b12-0de2-55c6-9aab-29f3d0a68a2e"
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 TruncatedStacktraces = "781d530d-4396-4725-bb49-402e4bee1e77"
 
+[weakdeps]
+Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
+EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
+Mooncake = "da2b9cff-9c12-43a0-ae48-6db2b0edb7d6"
+
+[extensions]
+FunctionWrappersWrappersEnzymeExt = ["Enzyme", "EnzymeCore"]
+FunctionWrappersWrappersMooncakeExt = "Mooncake"
+
 [compat]
+Enzyme = "0.13"
+EnzymeCore = "0.8"
 FunctionWrappers = "1"
+Mooncake = "0.4, 0.5"
 PrecompileTools = "1"
 TruncatedStacktraces = "1"
 julia = "1.10"
 
 [extras]
+Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
+EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
+Mooncake = "da2b9cff-9c12-43a0-ae48-6db2b0edb7d6"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Pkg", "Test"]
+test = ["Pkg", "Test", "Enzyme", "EnzymeCore", "Mooncake"]
