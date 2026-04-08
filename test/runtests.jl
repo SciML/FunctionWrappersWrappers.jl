@@ -59,3 +59,9 @@ if GROUP == "All" || GROUP == "Enzyme"
         include("enzyme_tests.jl")
     end
 end
+
+if GROUP == "All" || GROUP == "Mooncake"
+    @testset "Mooncake extension" begin
+        include("mooncake_tests.jl")
+    end
+end
