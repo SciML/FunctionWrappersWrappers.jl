@@ -45,6 +45,47 @@ end
     @test dx ≈ [6.0, 8.0]
 end
 
+@testset "Mooncake with wrapped callable struct" begin
+    # SciML wraps functions in Void{F} or similar callable structs before
+    # putting them in FunctionWrappersWrapper. The unwrapped function is
+    # then a non-primitive callable struct, not a plain function.
+    struct VoidWrapper{F}
+        f::F
+    end
+    function (v::VoidWrapper)(args...)
+        v.f(args...)
+        return nothing
+    end
+
+    function f!(du, u, p)
+        du[1] = p[1] * u[1]
+        du[2] = p[2] * u[2]
+        return nothing
+    end
+
+    wrapped = VoidWrapper(f!)
+    fww = FunctionWrappersWrapper(
+        wrapped,
+        (Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}},),
+        (Nothing,),
+    )
+
+    function loss(p)
+        u = [3.0, 4.0]
+        du = similar(u)
+        fww(du, u, p)
+        return sum(abs2, du)
+    end
+
+    rule = Mooncake.build_rrule(loss, [2.0, 3.0])
+    val, (_, dp) = Mooncake.value_and_gradient!!(rule, loss, [2.0, 3.0])
+    # du = [2*3, 3*4] = [6, 12], loss = 36 + 144 = 180
+    @test val ≈ 180.0
+    # ∂loss/∂p1 = 2*du[1]*u[1] = 2*6*3 = 36
+    # ∂loss/∂p2 = 2*du[2]*u[2] = 2*12*4 = 96
+    @test dp ≈ [36.0, 96.0]
+end
+
 @testset "Mooncake in-place function" begin
     # In-place functions are common in SciML (f!(du, u, p, t))
     function f!(du, u, p)
