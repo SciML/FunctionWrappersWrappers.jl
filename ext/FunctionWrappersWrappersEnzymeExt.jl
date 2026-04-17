@@ -6,43 +6,54 @@ using EnzymeCore
 using EnzymeCore.EnzymeRules
 
 # =============================================================================
-# Forward mode rules
+# Forward mode rules — generalized to arbitrary batch width W
 # =============================================================================
 
 # Shadow only (Forward mode, no primal)
 function EnzymeRules.forward(
-    ::EnzymeRules.FwdConfig{false, true, 1, RuntimeActivity, StrongZero},
+    ::EnzymeRules.FwdConfig{false, true, W, RuntimeActivity, StrongZero},
     func::EnzymeCore.Const{<:FunctionWrappersWrapper},
     RT::Type{<:EnzymeCore.Annotation{T}},
     args::Vararg{EnzymeCore.Annotation, N}
-) where {T, N, RuntimeActivity, StrongZero}
+) where {T, W, N, RuntimeActivity, StrongZero}
     f_orig = unwrap(func.val)
-    shadow_result = Enzyme.autodiff(Forward, Const(f_orig), Duplicated{T}, args...)
-    return shadow_result[1]::T
+    if W == 1
+        shadow_result = Enzyme.autodiff(Forward, Const(f_orig), Duplicated{T}, args...)
+        return shadow_result[1]::T
+    else
+        shadow_result = Enzyme.autodiff(Forward, Const(f_orig), BatchDuplicated{T, W}, args...)
+        return shadow_result[1]::NTuple{W, T}
+    end
 end
 
 # Both primal and shadow (ForwardWithPrimal mode)
 function EnzymeRules.forward(
-    ::EnzymeRules.FwdConfig{true, true, 1, RuntimeActivity, StrongZero},
+    ::EnzymeRules.FwdConfig{true, true, W, RuntimeActivity, StrongZero},
     func::EnzymeCore.Const{<:FunctionWrappersWrapper},
     RT::Type{<:EnzymeCore.Annotation{T}},
     args::Vararg{EnzymeCore.Annotation, N}
-) where {T, N, RuntimeActivity, StrongZero}
+) where {T, W, N, RuntimeActivity, StrongZero}
     f_orig = unwrap(func.val)
     pargs = ntuple(i -> args[i].val, Val(N))
     primal = f_orig(pargs...)::T
-    shadow_result = Enzyme.autodiff(Forward, Const(f_orig), Duplicated{T}, args...)
-    shadow = shadow_result[1]::T
-    return Duplicated(primal, shadow)
+    if W == 1
+        shadow_result = Enzyme.autodiff(Forward, Const(f_orig), Duplicated{T}, args...)
+        shadow = shadow_result[1]::T
+        return Duplicated(primal, shadow)
+    else
+        shadow_result = Enzyme.autodiff(Forward, Const(f_orig), BatchDuplicated{T, W}, args...)
+        shadows = shadow_result[1]::NTuple{W, T}
+        return BatchDuplicated(primal, shadows)
+    end
 end
 
-# Primal only (Const return type)
+# Primal only (Const return type) — width-independent
 function EnzymeRules.forward(
-    ::EnzymeRules.FwdConfig{true, false, 1, RuntimeActivity, StrongZero},
+    ::EnzymeRules.FwdConfig{true, false, W, RuntimeActivity, StrongZero},
     func::EnzymeCore.Const{<:FunctionWrappersWrapper},
     RT::Type{<:EnzymeCore.Annotation},
     args::Vararg{EnzymeCore.Annotation, N}
-) where {N, RuntimeActivity, StrongZero}
+) where {W, N, RuntimeActivity, StrongZero}
     f_orig = unwrap(func.val)
     pargs = ntuple(i -> args[i].val, Val(N))
     return f_orig(pargs...)
