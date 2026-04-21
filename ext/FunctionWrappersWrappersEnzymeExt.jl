@@ -59,6 +59,25 @@ function EnzymeRules.forward(
     return f_orig(pargs...)
 end
 
+# Neither primal nor shadow requested — Enzyme asks for this combo with Const
+# return-type annotations where the caller only needs the side effects of the
+# primal invocation (e.g. mutating an IIP RHS in SciML's solver path).  No rule
+# previously matched this case, so dispatch fell through to Enzyme's default
+# path which tried to differentiate through the raw FunctionWrappersWrapper
+# and failed with `MethodError: no method matching forward(…)` when the wrapper
+# only held plain-Float64 signatures.  Just run the primal and return nothing.
+function EnzymeRules.forward(
+    ::EnzymeRules.FwdConfig{false, false, W, RuntimeActivity, StrongZero},
+    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    RT::Type{<:EnzymeCore.Annotation},
+    args::Vararg{EnzymeCore.Annotation, N}
+) where {W, N, RuntimeActivity, StrongZero}
+    f_orig = unwrap(func.val)
+    pargs = ntuple(i -> args[i].val, Val(N))
+    f_orig(pargs...)
+    return nothing
+end
+
 # =============================================================================
 # Reverse mode rules
 # =============================================================================
