@@ -76,15 +76,17 @@ end
     @test result_wp[2] ≈ 9.0      # primal f(3) = 9
 end
 
-@testset "Enzyme forward mode, neither primal nor shadow requested" begin
-    # Covers EnzymeRules.FwdConfig{false, false, W, ...}: caller wants only the
-    # side-effects of the primal invocation, no return value and no derivative.
-    # Reproduces the SciML/OrdinaryDiffEq.jl v7 Downstream regression where
-    # Enzyme dispatched on this config combination with a FWW wrapping an IIP
-    # RHS and found no matching rule, throwing
-    #   MethodError: no method matching forward(
-    #       ::FwdConfigWidth{1, false, false, false, false},
-    #       ::Const{<:FunctionWrappersWrapper}, ::Type{Const{Nothing}}, …)
+@testset "Enzyme forward mode, Const return (IIP, no return-shadow)" begin
+    # Covers EnzymeRules.FwdConfig{false, false, W, ...} — Enzyme dispatches on
+    # this combo for IIP functions with a Const return type where the caller
+    # needs primal + shadow propagation via Duplicated args only (no return
+    # value to shadow).  Reproduces the SciML/OrdinaryDiffEq.jl v7 Downstream
+    # regression where this call previously produced:
+    #   - without any rule:      MethodError: no method matching forward(…)
+    #   - with a primal-only rule: trivial (zero) arg shadows, wrong Jacobians
+    #     (Rodas4/5/Veldd4 errors 4–9 orders of magnitude above tolerance).
+    # The rule must delegate to `Enzyme.autodiff` on the unwrapped function
+    # so Duplicated arg shadows propagate correctly.
     f!(du, u) = (du[1] = -u[1]^2; nothing)
     fww = FunctionWrappersWrapper(
         f!, (Tuple{Vector{Float64}, Vector{Float64}},), (Nothing,)
@@ -93,21 +95,18 @@ end
     du = [0.0]
     u = [3.0]
     du_shadow = [0.0]
-    u_shadow = [1.0]
+    u_shadow = [1.0]  # seed: ∂/∂u[1] = 1
 
-    # Call forward directly with {false, false}: Enzyme's public-facing
-    # autodiff front-end doesn't normally expose this config, so invoke the
-    # rule by hand.
     config = EnzymeCore.EnzymeRules.FwdConfig{false, false, 1, false, false}()
     ret = EnzymeCore.EnzymeRules.forward(
         config, Const(fww), EnzymeCore.Const{Nothing},
         Duplicated(du, du_shadow), Duplicated(u, u_shadow)
     )
     @test ret === nothing
-    # primal side-effect did happen: f!(du, u) sets du[1] = -u[1]^2 = -9
+    # Primal side-effect: du[1] = -u[1]^2 = -9
     @test du[1] ≈ -9.0
-    # shadow buffer was not touched by this no-diff path
-    @test du_shadow[1] == 0.0
+    # Shadow propagation: ∂du[1]/∂u[1] * u_shadow[1] = -2*u[1]*1 = -6
+    @test du_shadow[1] ≈ -6.0
 end
 
 @testset "Enzyme reverse mode, Const return — augmented_primal runs primal" begin
@@ -133,12 +132,14 @@ end
     @test aug.shadow === nothing
     @test aug.tape === nothing
 
-    # Reverse step — dret is Const, no grads to accumulate.
+    # Reverse step — dret is Const (passed as TYPE not instance in reverse
+    # rules).  Enzyme's rule protocol requires concrete gradients for Active
+    # args; under a Const return they're zero (no gradient source).
     grads = EnzymeRules.reverse(
-        rconfig, Const(fww), EnzymeCore.Const{Float64}(0.0),
+        rconfig, Const(fww), EnzymeCore.Const{Float64},
         aug.tape, Active(3.0), Active(4.0)
     )
-    @test grads == (nothing, nothing)
+    @test grads == (0.0, 0.0)
 end
 
 @testset "Enzyme reverse mode, Duplicated return — augmented_primal initializes shadow" begin
@@ -170,5 +171,109 @@ end
     @test aug.shadow isa NTuple{2, Float64}
     @test aug.shadow == (0.0, 0.0)
     @test aug.tape === nothing
+end
+
+# =============================================================================
+# End-to-end reverse-mode derivative tests — exercise Enzyme.autodiff(Reverse,
+# …) through the FWW and assert the resulting gradients are numerically correct.
+# The prior reverse-mode testsets only checked dispatch / shape of
+# AugmentedReturn; they did NOT verify the gradients are right.
+# =============================================================================
+
+@testset "Enzyme Reverse: Const return, Active args — no-flow gradients" begin
+    # For a function whose return is annotated Const in Reverse mode, there is
+    # no gradient source from the return, so Active arg gradients must be 0.
+    # (Enzyme's rule-return protocol requires concrete gradients for Active
+    # args — `nothing` is not allowed — so the rule returns zeros.)
+    g(x, y) = x * y + x^2
+    fww = FunctionWrappersWrapper(g, (Tuple{Float64, Float64},), (Float64,))
+
+    # Const return (instead of Active) → no gradient flows back
+    result = Enzyme.autodiff(Reverse, Const(fww), Const, Active(3.0), Active(4.0))
+    @test result[1] === (0.0, 0.0)
+end
+
+@testset "Enzyme Reverse: IIP with Duplicated args, Const return" begin
+    # SciML's standard pattern: IIP RHS `f!(du, u)` with Const return, both du
+    # and u are Duplicated.  Reverse mode should accumulate
+    #    u_shadow[i] += du_shadow[j] * ∂(du[j])/∂(u[i])
+    # into u_shadow.  For f!(du, u) = (du[1] = u[1]^2; nothing) with
+    #   du_shadow = [1.0] (incoming adjoint),
+    #   u[1] = 3.0,
+    #   ∂du[1]/∂u[1] = 2*u[1] = 6,
+    # the expected result is u_shadow[1] = 6.0 after the call.
+    f!(du, u) = (du[1] = u[1]^2; nothing)
+    fww = FunctionWrappersWrapper(
+        f!, (Tuple{Vector{Float64}, Vector{Float64}},), (Nothing,)
+    )
+
+    du = [0.0]
+    u = [3.0]
+    du_shadow = [1.0]
+    u_shadow = [0.0]
+
+    Enzyme.autodiff(
+        Reverse, Const(fww), Const,
+        Duplicated(du, du_shadow), Duplicated(u, u_shadow)
+    )
+    @test du[1] ≈ 9.0          # primal effect: du[1] = u[1]^2 = 9
+    @test u_shadow[1] ≈ 6.0    # reverse accumulation: 2 * u[1] * du_shadow[1]
+end
+
+@testset "Enzyme Reverse: IIP multi-component IIP with Duplicated args" begin
+    # Cross-coupled IIP RHS: each output depends on multiple inputs.
+    #   du[1] = u[1] * u[2]
+    #   du[2] = u[1]^2 + u[2]^3
+    # Jacobian at u = (x, y):
+    #   J = [  y     x  ;
+    #         2x   3y^2 ]
+    # In reverse mode with du_shadow = [a, b], transpose of J applied to
+    # du_shadow gives the accumulation into u_shadow:
+    #   u_shadow[1] += a*y + b*2x
+    #   u_shadow[2] += a*x + b*3y^2
+    f!(du, u) = (du[1] = u[1]*u[2]; du[2] = u[1]^2 + u[2]^3; nothing)
+    fww = FunctionWrappersWrapper(
+        f!, (Tuple{Vector{Float64}, Vector{Float64}},), (Nothing,)
+    )
+
+    x, y = 2.0, 5.0
+    a, b = 1.0, 0.5
+    du = zeros(2)
+    u = [x, y]
+    du_shadow = [a, b]
+    u_shadow = zeros(2)
+
+    Enzyme.autodiff(
+        Reverse, Const(fww), Const,
+        Duplicated(du, du_shadow), Duplicated(u, u_shadow)
+    )
+    @test du ≈ [x*y, x^2 + y^3]
+    @test u_shadow[1] ≈ a*y + b*2*x        # 5 + 2 = 7
+    @test u_shadow[2] ≈ a*x + b*3*y^2      # 2 + 37.5 = 39.5
+end
+
+@testset "Enzyme ReverseWithPrimal: IIP with Duplicated args" begin
+    # Same IIP pattern but with ReverseWithPrimal so we also check the primal
+    # is available when the rule is asked to include it.
+    f!(du, u) = (du[1] = u[1]^3; nothing)
+    fww = FunctionWrappersWrapper(
+        f!, (Tuple{Vector{Float64}, Vector{Float64}},), (Nothing,)
+    )
+
+    du = [0.0]
+    u = [2.0]
+    du_shadow = [1.0]
+    u_shadow = [0.0]
+
+    # Capture the expected gradient BEFORE the call — Enzyme may zero
+    # `du_shadow` after consuming it during the reverse pass.
+    expected_u_grad = 3 * u[1]^2 * du_shadow[1]  # = 12.0
+
+    Enzyme.autodiff(
+        ReverseWithPrimal, Const(fww), Const,
+        Duplicated(du, du_shadow), Duplicated(u, u_shadow)
+    )
+    @test du[1] ≈ 8.0
+    @test u_shadow[1] ≈ expected_u_grad
 end
 

@@ -59,13 +59,16 @@ function EnzymeRules.forward(
     return f_orig(pargs...)
 end
 
-# Neither primal nor shadow requested — Enzyme asks for this combo with Const
-# return-type annotations where the caller only needs the side effects of the
-# primal invocation (e.g. mutating an IIP RHS in SciML's solver path).  No rule
-# previously matched this case, so dispatch fell through to Enzyme's default
-# path which tried to differentiate through the raw FunctionWrappersWrapper
-# and failed with `MethodError: no method matching forward(…)` when the wrapper
-# only held plain-Float64 signatures.  Just run the primal and return nothing.
+# Neither primal nor shadow requested in the RETURN.  Enzyme dispatches on
+# this combo for IIP functions (Const return type) where the caller still
+# needs primal and shadow propagation through `Duplicated` args — e.g. SciML
+# solvers calling an IIP RHS via `AutoEnzyme(…, function_annotation = Const)`.
+# The previous revision ran `f_orig(pargs...)` by hand; that mutated the
+# primal IIP buffer but left `Duplicated` shadow buffers untouched, giving
+# trivial Jacobians and blowing up Rodas4/5/Veldd4 error tolerances 4–9
+# orders of magnitude in OrdinaryDiffEq.jl v7.  Delegate to `Enzyme.autodiff`
+# on the unwrapped function with a Const return annotation so the Duplicated
+# arg shadows are propagated correctly and no return is produced.
 function EnzymeRules.forward(
     ::EnzymeRules.FwdConfig{false, false, W, RuntimeActivity, StrongZero},
     func::EnzymeCore.Const{<:FunctionWrappersWrapper},
@@ -73,8 +76,7 @@ function EnzymeRules.forward(
     args::Vararg{EnzymeCore.Annotation, N}
 ) where {W, N, RuntimeActivity, StrongZero}
     f_orig = unwrap(func.val)
-    pargs = ntuple(i -> args[i].val, Val(N))
-    f_orig(pargs...)
+    Enzyme.autodiff(Forward, Const(f_orig), Const, args...)
     return nothing
 end
 
@@ -208,26 +210,37 @@ function EnzymeRules.reverse(
     end
 end
 
-# Const return (no derivative to propagate from the return) — uniform Active args.
+# Const return — Enzyme passes the RT as a `Type{<:Const}` to `reverse`, not
+# as an instance.  Delegate the reverse pass to
+# `Enzyme.autodiff(Reverse, Const(f_orig), Const, args...)` so gradients
+# accumulate into any `Duplicated` arg shadow buffers (the SciML IIP
+# pattern).  Simply returning `nothing` left Duplicated shadows at zero.
+#
+# Per Enzyme's rule return-type protocol, `Active` args require a concrete
+# scalar gradient (not `nothing`).  Under a `Const` return there is no
+# gradient source, so Active arg gradients are zero.  `Duplicated` /
+# `BatchDuplicated` args return `nothing` because their gradients are
+# accumulated in-place by the `Enzyme.autodiff(Reverse, …)` call above.
 function EnzymeRules.reverse(
     config::EnzymeRules.RevConfig,
     func::EnzymeCore.Const{<:FunctionWrappersWrapper},
-    dret::EnzymeCore.Const,
-    tape,
-    args::Vararg{EnzymeCore.Active, N}
-) where {N}
-    return ntuple(_ -> nothing, Val(N))
-end
-
-# Const return — mixed Active/Const args.
-function EnzymeRules.reverse(
-    config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
-    dret::EnzymeCore.Const,
+    dret::Type{<:EnzymeCore.Const},
     tape,
     args::Vararg{EnzymeCore.Annotation, N}
 ) where {N}
-    return ntuple(_ -> nothing, Val(N))
+    f_orig = unwrap(func.val)
+    # Only worth invoking Enzyme.autodiff when at least one arg is
+    # Duplicated/BatchDuplicated — otherwise there's nothing to accumulate.
+    if any(a -> a isa EnzymeCore.Duplicated || a isa EnzymeCore.BatchDuplicated, args)
+        Enzyme.autodiff(Reverse, Const(f_orig), Const, args...)
+    end
+    return ntuple(Val(N)) do i
+        if args[i] isa EnzymeCore.Active
+            zero(eltype(typeof(args[i])))
+        else
+            nothing
+        end
+    end
 end
 
 end
