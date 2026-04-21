@@ -76,15 +76,17 @@ end
     @test result_wp[2] ≈ 9.0      # primal f(3) = 9
 end
 
-@testset "Enzyme forward mode, neither primal nor shadow requested" begin
-    # Covers EnzymeRules.FwdConfig{false, false, W, ...}: caller wants only the
-    # side-effects of the primal invocation, no return value and no derivative.
-    # Reproduces the SciML/OrdinaryDiffEq.jl v7 Downstream regression where
-    # Enzyme dispatched on this config combination with a FWW wrapping an IIP
-    # RHS and found no matching rule, throwing
-    #   MethodError: no method matching forward(
-    #       ::FwdConfigWidth{1, false, false, false, false},
-    #       ::Const{<:FunctionWrappersWrapper}, ::Type{Const{Nothing}}, …)
+@testset "Enzyme forward mode, Const return (IIP, no return-shadow)" begin
+    # Covers EnzymeRules.FwdConfig{false, false, W, ...} — Enzyme dispatches on
+    # this combo for IIP functions with a Const return type where the caller
+    # needs primal + shadow propagation via Duplicated args only (no return
+    # value to shadow).  Reproduces the SciML/OrdinaryDiffEq.jl v7 Downstream
+    # regression where this call previously produced:
+    #   - without any rule:      MethodError: no method matching forward(…)
+    #   - with a primal-only rule: trivial (zero) arg shadows, wrong Jacobians
+    #     (Rodas4/5/Veldd4 errors 4–9 orders of magnitude above tolerance).
+    # The rule must delegate to `Enzyme.autodiff` on the unwrapped function
+    # so Duplicated arg shadows propagate correctly.
     f!(du, u) = (du[1] = -u[1]^2; nothing)
     fww = FunctionWrappersWrapper(
         f!, (Tuple{Vector{Float64}, Vector{Float64}},), (Nothing,)
@@ -93,21 +95,18 @@ end
     du = [0.0]
     u = [3.0]
     du_shadow = [0.0]
-    u_shadow = [1.0]
+    u_shadow = [1.0]  # seed: ∂/∂u[1] = 1
 
-    # Call forward directly with {false, false}: Enzyme's public-facing
-    # autodiff front-end doesn't normally expose this config, so invoke the
-    # rule by hand.
     config = EnzymeCore.EnzymeRules.FwdConfig{false, false, 1, false, false}()
     ret = EnzymeCore.EnzymeRules.forward(
         config, Const(fww), EnzymeCore.Const{Nothing},
         Duplicated(du, du_shadow), Duplicated(u, u_shadow)
     )
     @test ret === nothing
-    # primal side-effect did happen: f!(du, u) sets du[1] = -u[1]^2 = -9
+    # Primal side-effect: du[1] = -u[1]^2 = -9
     @test du[1] ≈ -9.0
-    # shadow buffer was not touched by this no-diff path
-    @test du_shadow[1] == 0.0
+    # Shadow propagation: ∂du[1]/∂u[1] * u_shadow[1] = -2*u[1]*1 = -6
+    @test du_shadow[1] ≈ -6.0
 end
 
 @testset "Enzyme reverse mode, Const return — augmented_primal runs primal" begin
