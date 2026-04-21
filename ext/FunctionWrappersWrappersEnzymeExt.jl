@@ -99,6 +99,56 @@ function EnzymeRules.augmented_primal(
     end
 end
 
+# Const return (e.g. IIP functions returning Nothing, or any non-differentiated
+# return). Just run the primal for its side effects; no tape is needed because
+# the reverse pass has nothing to propagate back from the return.
+function EnzymeRules.augmented_primal(
+    config::EnzymeRules.RevConfig,
+    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    RT::Type{<:EnzymeCore.Const},
+    args::Vararg{EnzymeCore.Annotation, N}
+) where {N}
+    f_orig = unwrap(func.val)
+    pargs = ntuple(i -> args[i].val, Val(N))
+    f_orig(pargs...)
+    return EnzymeRules.AugmentedReturn(nothing, nothing, nothing)
+end
+
+# Duplicated / BatchDuplicated return: record the primal so that reverse has
+# it available when propagating dret through the arguments.
+function EnzymeRules.augmented_primal(
+    config::EnzymeRules.RevConfig,
+    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    RT::Type{<:EnzymeCore.Duplicated{T}},
+    args::Vararg{EnzymeCore.Annotation, N}
+) where {T, N}
+    f_orig = unwrap(func.val)
+    pargs = ntuple(i -> args[i].val, Val(N))
+    primal = f_orig(pargs...)::T
+    if EnzymeRules.needs_primal(config)
+        return EnzymeRules.AugmentedReturn(primal, zero(primal), nothing)
+    else
+        return EnzymeRules.AugmentedReturn(nothing, zero(primal), nothing)
+    end
+end
+
+function EnzymeRules.augmented_primal(
+    config::EnzymeRules.RevConfig,
+    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    RT::Type{<:EnzymeCore.BatchDuplicated{T, W}},
+    args::Vararg{EnzymeCore.Annotation, N}
+) where {T, W, N}
+    f_orig = unwrap(func.val)
+    pargs = ntuple(i -> args[i].val, Val(N))
+    primal = f_orig(pargs...)::T
+    shadows = ntuple(_ -> zero(primal), Val(W))
+    if EnzymeRules.needs_primal(config)
+        return EnzymeRules.AugmentedReturn(primal, shadows, nothing)
+    else
+        return EnzymeRules.AugmentedReturn(nothing, shadows, nothing)
+    end
+end
+
 # Varargs reverse: compute each partial via forward-mode AD on the unwrapped
 # function, then scale by dret. This avoids type-inference issues that arise
 # from calling autodiff(Reverse, Const{Any}(...), ...).
@@ -156,6 +206,28 @@ function EnzymeRules.reverse(
             fwd[1] * dret_val
         end
     end
+end
+
+# Const return (no derivative to propagate from the return) — uniform Active args.
+function EnzymeRules.reverse(
+    config::EnzymeRules.RevConfig,
+    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    dret::EnzymeCore.Const,
+    tape,
+    args::Vararg{EnzymeCore.Active, N}
+) where {N}
+    return ntuple(_ -> nothing, Val(N))
+end
+
+# Const return — mixed Active/Const args.
+function EnzymeRules.reverse(
+    config::EnzymeRules.RevConfig,
+    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    dret::EnzymeCore.Const,
+    tape,
+    args::Vararg{EnzymeCore.Annotation, N}
+) where {N}
+    return ntuple(_ -> nothing, Val(N))
 end
 
 end

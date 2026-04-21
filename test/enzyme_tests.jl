@@ -109,3 +109,66 @@ end
     # shadow buffer was not touched by this no-diff path
     @test du_shadow[1] == 0.0
 end
+
+@testset "Enzyme reverse mode, Const return — augmented_primal runs primal" begin
+    # Mirrors the forward {false, false} case on the reverse side. Augmented
+    # primal runs the wrapped function for its side effects and returns
+    # AugmentedReturn(nothing, nothing, nothing).  Reverse returns `nothing`
+    # per arg since there is no return derivative to propagate.
+    counter = Ref(0)
+    g(x, y) = (counter[] += 1; x + y)  # returns Float64 (ignored via Const RT)
+    fww = FunctionWrappersWrapper(g, (Tuple{Float64, Float64},), (Float64,))
+
+    # Construct a concrete RevConfig. Fields:
+    # (NeedsPrimal, NeedsShadow, Width, Overwritten, RuntimeActivity, StrongZero)
+    rconfig = EnzymeRules.RevConfig{false, false, 1, (false, false), false, false}()
+
+    counter[] = 0
+    aug = EnzymeRules.augmented_primal(
+        rconfig, Const(fww), EnzymeCore.Const{Float64},
+        Active(3.0), Active(4.0)
+    )
+    @test counter[] == 1                       # primal ran exactly once
+    @test aug.primal === nothing               # NeedsPrimal == false
+    @test aug.shadow === nothing
+    @test aug.tape === nothing
+
+    # Reverse step — dret is Const, no grads to accumulate.
+    grads = EnzymeRules.reverse(
+        rconfig, Const(fww), EnzymeCore.Const{Float64}(0.0),
+        aug.tape, Active(3.0), Active(4.0)
+    )
+    @test grads == (nothing, nothing)
+end
+
+@testset "Enzyme reverse mode, Duplicated return — augmented_primal initializes shadow" begin
+    # Covers augmented_primal with RT <: Duplicated{T}.
+    f(x) = x^2
+    fww = FunctionWrappersWrapper(f, (Tuple{Float64},), (Float64,))
+    rconfig = EnzymeRules.RevConfig{true, true, 1, (false,), false, false}()
+
+    aug = EnzymeRules.augmented_primal(
+        rconfig, Const(fww), EnzymeCore.Duplicated{Float64},
+        Active(3.0)
+    )
+    @test aug.primal ≈ 9.0                    # f(3) = 9
+    @test aug.shadow ≈ 0.0                    # zero-initialized shadow
+    @test aug.tape === nothing
+end
+
+@testset "Enzyme reverse mode, BatchDuplicated return — augmented_primal initializes shadows" begin
+    # Covers augmented_primal with RT <: BatchDuplicated{T, W}.
+    f(x) = x^2
+    fww = FunctionWrappersWrapper(f, (Tuple{Float64},), (Float64,))
+    rconfig = EnzymeRules.RevConfig{true, true, 2, (false,), false, false}()
+
+    aug = EnzymeRules.augmented_primal(
+        rconfig, Const(fww), EnzymeCore.BatchDuplicated{Float64, 2},
+        Active(3.0)
+    )
+    @test aug.primal ≈ 9.0
+    @test aug.shadow isa NTuple{2, Float64}
+    @test aug.shadow == (0.0, 0.0)
+    @test aug.tape === nothing
+end
+
