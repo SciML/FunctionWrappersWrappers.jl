@@ -104,11 +104,7 @@ end
 # IMPORTANT: forward the `RuntimeActivity` and `StrongZero` flags from the
 # outer config into the delegated `Enzyme.autodiff` call.  Prior to this
 # fix the rule hard-coded `Forward`, silently dropping
-# `set_runtime_activity(Forward)` on the way down into `f_orig`.  That
-# broke `Rosenbrock23(autodiff = AutoEnzyme(set_runtime_activity(Forward)))`
-# on any time-dependent in-place RHS:
-#   EnzymeRuntimeActivityError at `broadcast_unalias` → `mightalias`
-# despite the user explicitly setting runtime activity.
+# `set_runtime_activity(Forward)` on the way down into `f_orig`. 
 function EnzymeRules.forward(
     ::EnzymeRules.FwdConfig{false, false, W, RuntimeActivity, StrongZero},
     func::EnzymeCore.Const{<:FunctionWrappersWrapper},
