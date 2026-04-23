@@ -277,3 +277,83 @@ end
     @test u_shadow[1] ≈ expected_u_grad
 end
 
+# =============================================================================
+# Runtime-activity propagation through the FWW forward rules.
+#
+# Prior to this fix the rules hard-coded plain `Forward` when delegating to
+# `Enzyme.autodiff`, silently dropping the caller's
+# `set_runtime_activity(Forward)` flag.  Enzyme's static IR-level activity
+# analysis can't see through `FunctionWrappersWrapper`'s opaque cfunction
+# indirection, so the inner call raised `EnzymeRuntimeActivityError` inside
+# `@.` broadcast's `broadcast_unalias` → `mightalias` — despite
+# `set_runtime_activity` being set on the outer `autodiff` call.
+#
+# Upstream motivation: OrdinaryDiffEq.jl PR #3518 —
+#   Rosenbrock23(autodiff = AutoEnzyme(set_runtime_activity(Enzyme.Forward)))
+# on any time-dependent in-place RHS routed through DiffEqBase's
+# `wrapfun_iip`.  Here we reproduce the shape (`f!(du, u, p, t) = @. du = …`)
+# in a 4-arg `FunctionWrappersWrapper` matching DiffEqBase's
+# `wrapfun_iip` output, and assert both that (a) the call completes without
+# an `EnzymeRuntimeActivityError` and (b) the resulting tangent is
+# numerically correct.
+# =============================================================================
+
+@testset "Enzyme Forward: set_runtime_activity propagates through FWW (IIP, time-dependent)" begin
+    # DiffEqBase's `wrapfun_iip(ff, (u, u, p, t))` shape.
+    const_INPUTS = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Float64}
+
+    # 1) Time-independent RHS — ∂du/∂t = 0.
+    f!(du, u, p, t) = (@. du = p * u; nothing)
+    fww = FunctionWrappersWrapper(f!, (const_INPUTS,), (Nothing,))
+
+    u = [1.0, 2.0, 3.0]
+    p = [0.5, 0.5, 0.5]
+    t = 1.7
+    du = zero(u); ddu = zero(u); dt = 1.0
+
+    Enzyme.autodiff(
+        Enzyme.set_runtime_activity(Forward),
+        Const(fww), Const,
+        Duplicated(du, ddu),
+        Const(u), Const(p),
+        Duplicated(t, dt),
+    )
+    @test du ≈ p .* u
+    @test all(iszero, ddu)
+
+    # 2) Non-trivial time dependence: g!(du,u,p,t) = @. sin(t)*u.
+    #    Expected ∂du/∂t = cos(t) .* u.
+    g!(du, u, p, t) = (@. du = sin(t) * u; nothing)
+    gww = FunctionWrappersWrapper(g!, (const_INPUTS,), (Nothing,))
+
+    du2 = zero(u); ddu2 = zero(u)
+    Enzyme.autodiff(
+        Enzyme.set_runtime_activity(Forward),
+        Const(gww), Const,
+        Duplicated(du2, ddu2),
+        Const(u), Const(p),
+        Duplicated(t, 1.0),
+    )
+    @test du2 ≈ sin(t) .* u
+    @test ddu2 ≈ cos(t) .* u
+
+    # 3) Confirm the rule also propagates `set_strong_zero(Forward)` (the
+    #    other ForwardMode flag carried in FwdConfig) — another RHS that
+    #    doesn't need runtime activity but exercises a distinct flag.
+    h!(du, u, p, t) = (du[1] = u[1] * t; nothing)
+    hww = FunctionWrappersWrapper(
+        h!, (Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Float64},),
+        (Nothing,)
+    )
+    du_h = [0.0]; ddu_h = [0.0]
+    Enzyme.autodiff(
+        Enzyme.set_strong_zero(Forward),
+        Const(hww), Const,
+        Duplicated(du_h, ddu_h),
+        Const([2.0]), Const([0.0]),
+        Duplicated(3.5, 1.0),
+    )
+    @test du_h[1] ≈ 2.0 * 3.5     # primal: u[1] * t = 7.0
+    @test ddu_h[1] ≈ 2.0          # ∂(u[1]*t)/∂t = u[1]
+end
+
