@@ -298,6 +298,112 @@ end
 # numerically correct.
 # =============================================================================
 
+# =============================================================================
+# Duplicated function annotation on the FWW itself.
+#
+# Reproduces SciML/FunctionWrappersWrappers.jl#48: when Enzyme differentiates
+# through a closure that captures an FWW (e.g. NonlinearSolve +
+# SciMLSensitivity), the rule is invoked with
+# `Duplicated{<:FunctionWrappersWrapper}` for the function argument, not
+# `Const{<:FunctionWrappersWrapper}`.  The FWW struct itself only carries
+# `FunctionWrapper`s + cache storage, so its "shadow" is ignored — we route
+# through `unwrap(func.val)` exactly as with `Const`.
+# =============================================================================
+
+@testset "Enzyme forward, Duplicated FWW annotation — IIP Const return" begin
+    f!(residual, u, p) = (residual[1] = u[1]^2 - p[1]; nothing)
+    fww = FunctionWrappersWrapper(
+        f!,
+        (Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}},),
+        (Nothing,)
+    )
+
+    residual = [0.0]; dresidual = [0.0]
+    u = [2.0];        du = [1.0]
+    p = [1.0];        dp = [0.0]
+
+    config = EnzymeCore.EnzymeRules.FwdConfig{false, false, 1, false, false}()
+    ret = EnzymeCore.EnzymeRules.forward(
+        config,
+        Duplicated(fww, fww),                # <-- the failing dispatch in #48
+        EnzymeCore.Const{Nothing},
+        Duplicated(residual, dresidual),
+        Duplicated(u, du),
+        Duplicated(p, dp),
+    )
+    @test ret === nothing
+    @test residual[1] ≈ 3.0      # u[1]^2 - p[1] = 4 - 1
+    @test dresidual[1] ≈ 4.0     # 2*u[1]*du[1] - 1*dp[1] = 4
+end
+
+@testset "Enzyme forward, Duplicated FWW annotation — shadow-only return" begin
+    # Drive the {false, true, W, …} rule (shadow only, no primal) with a
+    # Duplicated FWW.
+    f(x) = x^2
+    fww = FunctionWrappersWrapper(f, (Tuple{Float64},), (Float64,))
+
+    config = EnzymeCore.EnzymeRules.FwdConfig{false, true, 1, false, false}()
+    shadow = EnzymeCore.EnzymeRules.forward(
+        config,
+        Duplicated(fww, fww),
+        EnzymeCore.Duplicated{Float64},
+        Duplicated(3.0, 1.0),
+    )
+    @test shadow ≈ 6.0           # f'(3) = 2*3 = 6
+end
+
+@testset "Enzyme forward, Duplicated FWW annotation — primal + shadow return" begin
+    # Drive the {true, true, W, …} rule (ForwardWithPrimal) with a Duplicated
+    # FWW.
+    f(x) = x^2
+    fww = FunctionWrappersWrapper(f, (Tuple{Float64},), (Float64,))
+
+    config = EnzymeCore.EnzymeRules.FwdConfig{true, true, 1, false, false}()
+    result = EnzymeCore.EnzymeRules.forward(
+        config,
+        Duplicated(fww, fww),
+        EnzymeCore.Duplicated{Float64},
+        Duplicated(3.0, 1.0),
+    )
+    @test result isa Duplicated
+    @test result.val ≈ 9.0       # primal
+    @test result.dval ≈ 6.0      # shadow
+end
+
+@testset "Enzyme reverse, Duplicated FWW annotation — Const return IIP" begin
+    # Mirror the forward IIP case on the reverse side.  Duplicated FWW must
+    # still drive the rule, gradients must accumulate into u_shadow.
+    f!(du, u) = (du[1] = u[1]^2; nothing)
+    fww = FunctionWrappersWrapper(
+        f!, (Tuple{Vector{Float64}, Vector{Float64}},), (Nothing,)
+    )
+
+    du = [0.0];       du_shadow = [1.0]
+    u  = [3.0];       u_shadow  = [0.0]
+
+    rconfig = EnzymeRules.RevConfig{false, false, 1, (false, false), false, false}()
+    aug = EnzymeRules.augmented_primal(
+        rconfig,
+        Duplicated(fww, fww),                # <-- Duplicated FWW
+        EnzymeCore.Const{Nothing},
+        Duplicated(du, du_shadow),
+        Duplicated(u, u_shadow),
+    )
+    @test aug.primal === nothing
+    @test aug.shadow === nothing
+
+    EnzymeRules.reverse(
+        rconfig,
+        Duplicated(fww, fww),
+        EnzymeCore.Const{Nothing},
+        aug.tape,
+        Duplicated(du, du_shadow),
+        Duplicated(u, u_shadow),
+    )
+    @test du[1] ≈ 9.0            # primal effect from augmented_primal
+    @test u_shadow[1] ≈ 6.0      # reverse accumulation: 2*u[1]*du_shadow[1]
+end
+
 @testset "Enzyme Forward: set_runtime_activity propagates through FWW (IIP, time-dependent)" begin
     # DiffEqBase's `wrapfun_iip(ff, (u, u, p, t))` shape.
     const_INPUTS = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Float64}

@@ -36,9 +36,19 @@ end
 # =============================================================================
 
 # Shadow only (Forward mode, no primal)
+#
+# `func` is `Annotation{<:FunctionWrappersWrapper}` rather than
+# `Const{<:FunctionWrappersWrapper}` so that callers passing
+# `Duplicated{<:FunctionWrappersWrapper}` also dispatch here.  Enzyme drives
+# the rule that way when the outer `autodiff` call is differentiating through
+# a closure that carries an FWW (e.g. NonlinearSolve + SciMLSensitivity, see
+# SciML/FunctionWrappersWrappers.jl#48).  The FWW struct itself only carries
+# `FunctionWrapper`s plus cache storage — none of those fields have a
+# meaningful tangent — so the function shadow is ignored and the inner
+# `Enzyme.autodiff` call uses `Const(f_orig)`.
 function EnzymeRules.forward(
     ::EnzymeRules.FwdConfig{false, true, W, RuntimeActivity, StrongZero},
-    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
     RT::Type{<:EnzymeCore.Annotation{T}},
     args::Vararg{EnzymeCore.Annotation, N}
 ) where {T, W, N, RuntimeActivity, StrongZero}
@@ -56,7 +66,7 @@ end
 # Both primal and shadow (ForwardWithPrimal mode)
 function EnzymeRules.forward(
     ::EnzymeRules.FwdConfig{true, true, W, RuntimeActivity, StrongZero},
-    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
     RT::Type{<:EnzymeCore.Annotation{T}},
     args::Vararg{EnzymeCore.Annotation, N}
 ) where {T, W, N, RuntimeActivity, StrongZero}
@@ -81,7 +91,7 @@ end
 # Primal only (Const return type) — width-independent
 function EnzymeRules.forward(
     ::EnzymeRules.FwdConfig{true, false, W, RuntimeActivity, StrongZero},
-    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
     RT::Type{<:EnzymeCore.Annotation},
     args::Vararg{EnzymeCore.Annotation, N}
 ) where {W, N, RuntimeActivity, StrongZero}
@@ -107,7 +117,7 @@ end
 # `set_runtime_activity(Forward)` on the way down into `f_orig`. 
 function EnzymeRules.forward(
     ::EnzymeRules.FwdConfig{false, false, W, RuntimeActivity, StrongZero},
-    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
     RT::Type{<:EnzymeCore.Annotation},
     args::Vararg{EnzymeCore.Annotation, N}
 ) where {W, N, RuntimeActivity, StrongZero}
@@ -123,7 +133,7 @@ end
 
 function EnzymeRules.augmented_primal(
     config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
     RT::Type{<:EnzymeCore.Active{T}},
     args::Vararg{EnzymeCore.Annotation, N}
 ) where {T, N}
@@ -143,7 +153,7 @@ end
 # the reverse pass has nothing to propagate back from the return.
 function EnzymeRules.augmented_primal(
     config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
     RT::Type{<:EnzymeCore.Const},
     args::Vararg{EnzymeCore.Annotation, N}
 ) where {N}
@@ -157,7 +167,7 @@ end
 # it available when propagating dret through the arguments.
 function EnzymeRules.augmented_primal(
     config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
     RT::Type{<:EnzymeCore.Duplicated{T}},
     args::Vararg{EnzymeCore.Annotation, N}
 ) where {T, N}
@@ -173,7 +183,7 @@ end
 
 function EnzymeRules.augmented_primal(
     config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
     RT::Type{<:EnzymeCore.BatchDuplicated{T, W}},
     args::Vararg{EnzymeCore.Annotation, N}
 ) where {T, W, N}
@@ -220,7 +230,7 @@ end
 
 function EnzymeRules.reverse(
     config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
     dret::EnzymeCore.Active{T},
     tape,
     args::Vararg{EnzymeCore.Active, N}
@@ -232,7 +242,7 @@ end
 # Handle mixed Active/Const args: return nothing for Const, gradient for Active
 function EnzymeRules.reverse(
     config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
     dret::EnzymeCore.Active,
     tape,
     args::Vararg{EnzymeCore.Annotation, N}
@@ -271,7 +281,7 @@ end
 # accumulated in-place by the `Enzyme.autodiff(Reverse, …)` call above.
 function EnzymeRules.reverse(
     config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Const{<:FunctionWrappersWrapper},
+    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
     dret::Type{<:EnzymeCore.Const},
     tape,
     args::Vararg{EnzymeCore.Annotation, N}
