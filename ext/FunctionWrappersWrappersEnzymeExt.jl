@@ -59,7 +59,12 @@ function EnzymeRules.forward(
         return shadow_result[1]::T
     else
         shadow_result = Enzyme.autodiff(mode, Const(f_orig), BatchDuplicated{T, W}, args...)
-        return shadow_result[1]::NTuple{W, T}
+        # Enzyme returns the batch shadow as an `AnonymousStruct` — a
+        # `NamedTuple{(:1, :2, …), NTuple{W, T}}` (see
+        # `Enzyme.Compiler.AnonymousStruct` in `Enzyme/src/compiler/utils.jl`).
+        # Convert to a plain tuple so the rule's return matches the
+        # `BatchDuplicated` shadow contract Enzyme expects from a forward rule.
+        return Tuple(shadow_result[1])::NTuple{W, T}
     end
 end
 
@@ -83,7 +88,9 @@ function EnzymeRules.forward(
         return Duplicated(primal, shadow)
     else
         shadow_result = Enzyme.autodiff(mode, Const(f_orig), BatchDuplicated{T, W}, args...)
-        shadows = shadow_result[1]::NTuple{W, T}
+        # See the comment on the {false, true} rule — `shadow_result[1]` is a
+        # NamedTuple, not an NTuple.
+        shadows = Tuple(shadow_result[1])::NTuple{W, T}
         return BatchDuplicated(primal, shadows)
     end
 end
