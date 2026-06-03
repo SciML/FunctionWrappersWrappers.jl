@@ -39,8 +39,8 @@ EnzymeCore.EnzymeRules.inactive_type(::Type{NoCacheStorage}) = true
 # `ForwardMode` matching the outer config so the delegated call inherits
 # those flags.
 @inline function _fwd_mode(
-    ::Val{NeedsPrimal}, ::Val{RuntimeActivity}, ::Val{StrongZero}
-) where {NeedsPrimal, RuntimeActivity, StrongZero}
+        ::Val{NeedsPrimal}, ::Val{RuntimeActivity}, ::Val{StrongZero}
+    ) where {NeedsPrimal, RuntimeActivity, StrongZero}
     mode = NeedsPrimal ? ForwardWithPrimal : Forward
     RuntimeActivity && (mode = Enzyme.set_runtime_activity(mode))
     StrongZero && (mode = Enzyme.set_strong_zero(mode))
@@ -63,11 +63,11 @@ end
 # meaningful tangent — so the function shadow is ignored and the inner
 # `Enzyme.autodiff` call uses `Const(f_orig)`.
 function EnzymeRules.forward(
-    ::EnzymeRules.FwdConfig{false, true, W, RuntimeActivity, StrongZero},
-    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
-    RT::Type{<:EnzymeCore.Annotation{T}},
-    args::Vararg{EnzymeCore.Annotation, N}
-) where {T, W, N, RuntimeActivity, StrongZero}
+        ::EnzymeRules.FwdConfig{false, true, W, RuntimeActivity, StrongZero},
+        func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
+        RT::Type{<:EnzymeCore.Annotation{T}},
+        args::Vararg{EnzymeCore.Annotation, N}
+    ) where {T, W, N, RuntimeActivity, StrongZero}
     f_orig = unwrap(func.val)
     mode = _fwd_mode(Val(false), Val(RuntimeActivity), Val(StrongZero))
     if W == 1
@@ -86,11 +86,11 @@ end
 
 # Both primal and shadow (ForwardWithPrimal mode)
 function EnzymeRules.forward(
-    ::EnzymeRules.FwdConfig{true, true, W, RuntimeActivity, StrongZero},
-    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
-    RT::Type{<:EnzymeCore.Annotation{T}},
-    args::Vararg{EnzymeCore.Annotation, N}
-) where {T, W, N, RuntimeActivity, StrongZero}
+        ::EnzymeRules.FwdConfig{true, true, W, RuntimeActivity, StrongZero},
+        func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
+        RT::Type{<:EnzymeCore.Annotation{T}},
+        args::Vararg{EnzymeCore.Annotation, N}
+    ) where {T, W, N, RuntimeActivity, StrongZero}
     f_orig = unwrap(func.val)
     pargs = ntuple(i -> args[i].val, Val(N))
     primal = f_orig(pargs...)::T
@@ -113,11 +113,11 @@ end
 
 # Primal only (Const return type) — width-independent
 function EnzymeRules.forward(
-    ::EnzymeRules.FwdConfig{true, false, W, RuntimeActivity, StrongZero},
-    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
-    RT::Type{<:EnzymeCore.Annotation},
-    args::Vararg{EnzymeCore.Annotation, N}
-) where {W, N, RuntimeActivity, StrongZero}
+        ::EnzymeRules.FwdConfig{true, false, W, RuntimeActivity, StrongZero},
+        func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
+        RT::Type{<:EnzymeCore.Annotation},
+        args::Vararg{EnzymeCore.Annotation, N}
+    ) where {W, N, RuntimeActivity, StrongZero}
     f_orig = unwrap(func.val)
     pargs = ntuple(i -> args[i].val, Val(N))
     return f_orig(pargs...)
@@ -137,13 +137,13 @@ end
 # IMPORTANT: forward the `RuntimeActivity` and `StrongZero` flags from the
 # outer config into the delegated `Enzyme.autodiff` call.  Prior to this
 # fix the rule hard-coded `Forward`, silently dropping
-# `set_runtime_activity(Forward)` on the way down into `f_orig`. 
+# `set_runtime_activity(Forward)` on the way down into `f_orig`.
 function EnzymeRules.forward(
-    ::EnzymeRules.FwdConfig{false, false, W, RuntimeActivity, StrongZero},
-    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
-    RT::Type{<:EnzymeCore.Annotation},
-    args::Vararg{EnzymeCore.Annotation, N}
-) where {W, N, RuntimeActivity, StrongZero}
+        ::EnzymeRules.FwdConfig{false, false, W, RuntimeActivity, StrongZero},
+        func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
+        RT::Type{<:EnzymeCore.Annotation},
+        args::Vararg{EnzymeCore.Annotation, N}
+    ) where {W, N, RuntimeActivity, StrongZero}
     f_orig = unwrap(func.val)
     mode = _fwd_mode(Val(false), Val(RuntimeActivity), Val(StrongZero))
     Enzyme.autodiff(mode, Const(f_orig), Const, args...)
@@ -155,11 +155,11 @@ end
 # =============================================================================
 
 function EnzymeRules.augmented_primal(
-    config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
-    RT::Type{<:EnzymeCore.Active{T}},
-    args::Vararg{EnzymeCore.Annotation, N}
-) where {T, N}
+        config::EnzymeRules.RevConfig,
+        func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
+        RT::Type{<:EnzymeCore.Active{T}},
+        args::Vararg{EnzymeCore.Annotation, N}
+    ) where {T, N}
     f_orig = unwrap(func.val)
     pargs = ntuple(i -> args[i].val, Val(N))
     result = f_orig(pargs...)::T
@@ -175,11 +175,11 @@ end
 # return). Just run the primal for its side effects; no tape is needed because
 # the reverse pass has nothing to propagate back from the return.
 function EnzymeRules.augmented_primal(
-    config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
-    RT::Type{<:EnzymeCore.Const},
-    args::Vararg{EnzymeCore.Annotation, N}
-) where {N}
+        config::EnzymeRules.RevConfig,
+        func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
+        RT::Type{<:EnzymeCore.Const},
+        args::Vararg{EnzymeCore.Annotation, N}
+    ) where {N}
     f_orig = unwrap(func.val)
     pargs = ntuple(i -> args[i].val, Val(N))
     f_orig(pargs...)
@@ -189,11 +189,11 @@ end
 # Duplicated / BatchDuplicated return: record the primal so that reverse has
 # it available when propagating dret through the arguments.
 function EnzymeRules.augmented_primal(
-    config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
-    RT::Type{<:EnzymeCore.Duplicated{T}},
-    args::Vararg{EnzymeCore.Annotation, N}
-) where {T, N}
+        config::EnzymeRules.RevConfig,
+        func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
+        RT::Type{<:EnzymeCore.Duplicated{T}},
+        args::Vararg{EnzymeCore.Annotation, N}
+    ) where {T, N}
     f_orig = unwrap(func.val)
     pargs = ntuple(i -> args[i].val, Val(N))
     primal = f_orig(pargs...)::T
@@ -205,11 +205,11 @@ function EnzymeRules.augmented_primal(
 end
 
 function EnzymeRules.augmented_primal(
-    config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
-    RT::Type{<:EnzymeCore.BatchDuplicated{T, W}},
-    args::Vararg{EnzymeCore.Annotation, N}
-) where {T, W, N}
+        config::EnzymeRules.RevConfig,
+        func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
+        RT::Type{<:EnzymeCore.BatchDuplicated{T, W}},
+        args::Vararg{EnzymeCore.Annotation, N}
+    ) where {T, W, N}
     f_orig = unwrap(func.val)
     pargs = ntuple(i -> args[i].val, Val(N))
     primal = f_orig(pargs...)::T
@@ -235,41 +235,43 @@ end
 # function, then scale by dret. This avoids type-inference issues that arise
 # from calling autodiff(Reverse, Const{Any}(...), ...).
 @generated function _fww_reverse_grads(
-    mode, f_orig, dret_val::T, args::Vararg{EnzymeCore.Active, N}
-) where {T, N}
+        mode, f_orig, dret_val::T, args::Vararg{EnzymeCore.Active, N}
+    ) where {T, N}
     # Build forward-mode calls for each partial derivative
     exprs = []
     for i in 1:N
         seeds = [j == i ? :(one(eltype(typeof(args[$j])))) : :(zero(eltype(typeof(args[$j])))) for j in 1:N]
         dups = [:(Duplicated(args[$j].val, $(seeds[j]))) for j in 1:N]
         Ti = :(eltype(typeof(args[$i])))
-        push!(exprs, quote
-            fwd = Enzyme.autodiff(mode, Const(f_orig), Duplicated{$T}, $(dups...))
-            $Ti(fwd[1] * dret_val)::$Ti
-        end)
+        push!(
+            exprs, quote
+                fwd = Enzyme.autodiff(mode, Const(f_orig), Duplicated{$T}, $(dups...))
+                $Ti(fwd[1] * dret_val)::$Ti
+            end
+        )
     end
     return Expr(:tuple, exprs...)
 end
 
 function EnzymeRules.reverse(
-    config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
-    dret::EnzymeCore.Active{T},
-    tape,
-    args::Vararg{EnzymeCore.Active, N}
-) where {T, N}
+        config::EnzymeRules.RevConfig,
+        func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
+        dret::EnzymeCore.Active{T},
+        tape,
+        args::Vararg{EnzymeCore.Active, N}
+    ) where {T, N}
     f_orig = unwrap(func.val)
     return _fww_reverse_grads(_fwd_mode_from_rev(config), f_orig, dret.val, args...)
 end
 
 # Handle mixed Active/Const args: return nothing for Const, gradient for Active
 function EnzymeRules.reverse(
-    config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
-    dret::EnzymeCore.Active,
-    tape,
-    args::Vararg{EnzymeCore.Annotation, N}
-) where {N}
+        config::EnzymeRules.RevConfig,
+        func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
+        dret::EnzymeCore.Active,
+        tape,
+        args::Vararg{EnzymeCore.Annotation, N}
+    ) where {N}
     f_orig = unwrap(func.val)
     dret_val = dret.val
     mode = _fwd_mode_from_rev(config)
@@ -303,12 +305,12 @@ end
 # `BatchDuplicated` args return `nothing` because their gradients are
 # accumulated in-place by the `Enzyme.autodiff(Reverse, …)` call above.
 function EnzymeRules.reverse(
-    config::EnzymeRules.RevConfig,
-    func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
-    dret::Type{<:EnzymeCore.Const},
-    tape,
-    args::Vararg{EnzymeCore.Annotation, N}
-) where {N}
+        config::EnzymeRules.RevConfig,
+        func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
+        dret::Type{<:EnzymeCore.Const},
+        tape,
+        args::Vararg{EnzymeCore.Annotation, N}
+    ) where {N}
     f_orig = unwrap(func.val)
     # Only worth invoking Enzyme.autodiff when at least one arg is
     # Duplicated/BatchDuplicated — otherwise there's nothing to accumulate.

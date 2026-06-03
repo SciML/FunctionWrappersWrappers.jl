@@ -284,7 +284,7 @@ end
     # du_shadow gives the accumulation into u_shadow:
     #   u_shadow[1] += a*y + b*2x
     #   u_shadow[2] += a*x + b*3y^2
-    f!(du, u) = (du[1] = u[1]*u[2]; du[2] = u[1]^2 + u[2]^3; nothing)
+    f!(du, u) = (du[1] = u[1] * u[2]; du[2] = u[1]^2 + u[2]^3; nothing)
     fww = FunctionWrappersWrapper(
         f!, (Tuple{Vector{Float64}, Vector{Float64}},), (Nothing,)
     )
@@ -300,9 +300,9 @@ end
         Reverse, Const(fww), Const,
         Duplicated(du, du_shadow), Duplicated(u, u_shadow)
     )
-    @test du ≈ [x*y, x^2 + y^3]
-    @test u_shadow[1] ≈ a*y + b*2*x        # 5 + 2 = 7
-    @test u_shadow[2] ≈ a*x + b*3*y^2      # 2 + 37.5 = 39.5
+    @test du ≈ [x * y, x^2 + y^3]
+    @test u_shadow[1] ≈ a * y + b * 2 * x        # 5 + 2 = 7
+    @test u_shadow[2] ≈ a * x + b * 3 * y^2      # 2 + 37.5 = 39.5
 end
 
 @testset "Enzyme ReverseWithPrimal: IIP with Duplicated args" begin
@@ -432,7 +432,7 @@ end
     )
 
     du = [0.0];       du_shadow = [1.0]
-    u  = [3.0];       u_shadow  = [0.0]
+    u = [3.0];       u_shadow = [0.0]
 
     rconfig = EnzymeRules.RevConfig{false, false, 1, (false, false), false, false}()
     aug = EnzymeRules.augmented_primal(
@@ -515,4 +515,3 @@ end
     @test du_h[1] ≈ 2.0 * 3.5     # primal: u[1] * t = 7.0
     @test ddu_h[1] ≈ 2.0          # ∂(u[1]*t)/∂t = u[1]
 end
-
