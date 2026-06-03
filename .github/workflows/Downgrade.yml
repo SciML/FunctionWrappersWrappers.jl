@@ -1,4 +1,4 @@
-name: "Tests"
+name: Downgrade
 
 on:
   pull_request:
@@ -18,26 +18,16 @@ concurrency:
   cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch || github.ref != 'refs/tags/v*' }}
 
 jobs:
-  test:
-    name: "Tests"
+  downgrade:
+    name: Downgrade
     strategy:
       fail-fast: false
       matrix:
         group:
           - Core
-          - nopre
-        version:
-          - '1'
-          - 'lts'
-          - 'pre'
-        arch:
-          - x64
-        exclude:
-          - version: 'pre'
-            group: 'nopre'
-    uses: "SciML/.github/.github/workflows/tests.yml@v1"
+    uses: "SciML/.github/.github/workflows/downgrade.yml@v1"
     with:
       group: "${{ matrix.group }}"
-      julia-version: "${{ matrix.version }}"
-      julia-arch: "${{ matrix.arch }}"
+      julia-version: "lts"
+      skip: "Pkg,TOML"
     secrets: "inherit"
