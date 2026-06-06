@@ -245,11 +245,12 @@ end
 end
 
 @testset "Conversion" begin
-    fww_exp = FunctionWrappersWrapper(exp, (Tuple{Float64}, Tuple{Int},),
-        (Float64, Int))
+    fww_exp = FunctionWrappersWrapper(exp, (Tuple{Float64}, Tuple{Float32},),
+        (Float64, Float32))
     FWW = typeof(fww_exp)
 
     fww_cos = FWW(cos)
     @test typeof(fww_cos) == FWW
+    @test fww_cos(0.5) == cos(0.5)
 
 end
