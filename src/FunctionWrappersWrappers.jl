@@ -111,6 +111,19 @@ end
 
 TruncatedStacktraces.@truncate_stacktrace FunctionWrappersWrapper
 
+"""
+    FunctionWrappersWrapper{FW, P, CS}(f)
+
+Create a `FunctionWrappersWrapper` when the type parameters are specified.
+
+# Arguments
+- `f`: The function to wrap
+
+# Type parameters
+- `FW`: Tuple type of `FunctionWrapper`s
+- `P`: Fallback policy (`Strict`, `AllowAll`, or `AllowNonIsBits`)
+- `CS`: Cache storage type (`NoCacheStorage`, `SingleCacheStorage`, `DictCacheStorage`)
+"""
 function FunctionWrappersWrapper{FW, P, CS}(f) where {K, FW <: NTuple{K, Any}, P, CS}
     fw = ntuple(i -> FW.parameters[i](f), Val(K))
     cs = CS()
