@@ -111,6 +111,12 @@ end
 
 TruncatedStacktraces.@truncate_stacktrace FunctionWrappersWrapper
 
+function FunctionWrappersWrapper{FW, P, CS}(f) where {K, FW <: NTuple{K, Any}, P, CS}
+    fw = ntuple(i -> FW.parameters[i](f), Val(K))
+    cs = CS()
+    return FunctionWrappersWrapper{FW, P, CS}(fw, cs)
+end
+
 """
     FunctionWrappersWrapper(f, argtypes, rettypes; cache=SingleCache(), policy=AllowNonIsBits())
 

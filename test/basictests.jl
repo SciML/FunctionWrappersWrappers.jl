@@ -243,3 +243,13 @@ end
     # Float32 is isbits mismatch → errors
     @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError fww(4.0f0, 8.0f0)
 end
+
+@testset "Conversion" begin
+    fww_exp = FunctionWrappersWrapper(exp, (Tuple{Float64}, Tuple{Int},),
+        (Float64, Int))
+    FWW = typeof(fww_exp)
+
+    fww_cos = FWW(cos)
+    @test typeof(fww_cos) == FWW
+
+end
