@@ -143,6 +143,8 @@ function FunctionWrappersWrapper(
     return FunctionWrappersWrapper{typeof(fwt), typeof(policy), typeof(cs)}(fwt, cs)
 end
 
+Base.convert(::Type{T}, obj) where T <: FunctionWrappersWrapper = T(obj)
+Base.convert(::Type{T}, obj::T) where T <: FunctionWrappersWrapper = obj
 
 # ============================================================================
 # Call dispatch — entry point
