@@ -28,5 +28,13 @@ jobs:
     uses: "SciML/.github/.github/workflows/downgrade.yml@v1"
     with:
       group: "${{ matrix.group }}"
-      julia-version: "lts"
+      # The Mooncake/Enzyme test extras only resolve at their declared minimum
+      # versions on Julia >= 1.11.6: every Mooncake 0.5.x requires julia >= 1.10.8,
+      # and the Enzyme 0.13 + EnzymeCore 0.8 + Mooncake 0.5 floor set has no
+      # minimum-version solution on the 1.10 LTS stdlib line. The downgrade
+      # resolver minimizes julia to the floor of its --julia range, so on lts
+      # (=1.10, which admits 1.10.0) it strands Mooncake -> Unsatisfiable. Pin the
+      # downgrade leg to 1.11 (resolves to julia 1.11.6); the core package's 1.10
+      # support is still exercised by the regular Tests workflow.
+      julia-version: "1.11"
     secrets: "inherit"
