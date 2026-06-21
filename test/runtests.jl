@@ -22,8 +22,14 @@ run_tests(;
                 end
             end,
         ),
-        "Enzyme" => joinpath(@__DIR__, "Enzyme", "enzyme_tests.jl"),
-        "Mooncake" => joinpath(@__DIR__, "Mooncake", "mooncake_tests.jl"),
+        "Enzyme" => (;
+            env = joinpath(@__DIR__, "Enzyme"),
+            body = joinpath(@__DIR__, "Enzyme", "enzyme_tests.jl"),
+        ),
+        "Mooncake" => (;
+            env = joinpath(@__DIR__, "Mooncake"),
+            body = joinpath(@__DIR__, "Mooncake", "mooncake_tests.jl"),
+        ),
     ),
     all = ["Core", "Enzyme", "Mooncake"],
 )

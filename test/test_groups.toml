@@ -3,3 +3,9 @@ versions = ["lts", "1", "pre"]
 
 [nopre]
 versions = ["lts", "1"]
+
+[Enzyme]
+versions = ["lts", "1"]
+
+[Mooncake]
+versions = ["lts", "1"]
