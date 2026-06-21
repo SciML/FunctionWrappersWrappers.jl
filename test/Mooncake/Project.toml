@@ -1,0 +1,13 @@
+[deps]
+FunctionWrappersWrappers = "77dc65aa-8811-40c2-897b-53d922fa7daf"
+Mooncake = "da2b9cff-9c12-43a0-ae48-6db2b0edb7d6"
+SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[sources]
+FunctionWrappersWrappers = {path = "../.."}
+
+[compat]
+Mooncake = "0.5"
+SafeTestsets = "0.0.1, 0.1, 1"
+Test = "1"
