@@ -246,8 +246,8 @@ end
 
 @testset "Conversion" begin
     fww_exp = FunctionWrappersWrapper(
-        exp, 
-        (Tuple{Float64}, Tuple{Float32},),
+        exp,
+        (Tuple{Float64}, Tuple{Float32}),
         (Float64, Float32)
     )
     FWW = typeof(fww_exp)
