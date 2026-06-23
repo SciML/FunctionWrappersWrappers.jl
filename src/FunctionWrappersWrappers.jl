@@ -112,6 +112,25 @@ end
 TruncatedStacktraces.@truncate_stacktrace FunctionWrappersWrapper
 
 """
+    FunctionWrappersWrapper{FW, P, CS}(f)
+
+Create a `FunctionWrappersWrapper` when the type parameters are specified.
+
+# Arguments
+- `f`: The function to wrap
+
+# Type parameters
+- `FW`: Tuple type of `FunctionWrapper`s
+- `P`: Fallback policy (`Strict`, `AllowAll`, or `AllowNonIsBits`)
+- `CS`: Cache storage type (`NoCacheStorage`, `SingleCacheStorage`, `DictCacheStorage`)
+"""
+function FunctionWrappersWrapper{FW, P, CS}(f) where {K, FW <: NTuple{K, Any}, P, CS}
+    fw = ntuple(i -> FW.parameters[i](f), Val(K))
+    cs = CS()
+    return FunctionWrappersWrapper{FW, P, CS}(fw, cs)
+end
+
+"""
     FunctionWrappersWrapper(f, argtypes, rettypes; cache=SingleCache(), policy=AllowNonIsBits())
 
 Create a `FunctionWrappersWrapper` with configurable fallback behavior.
@@ -137,6 +156,8 @@ function FunctionWrappersWrapper(
     return FunctionWrappersWrapper{typeof(fwt), typeof(policy), typeof(cs)}(fwt, cs)
 end
 
+Base.convert(::Type{T}, obj) where {T <: FunctionWrappersWrapper} = T(obj)
+Base.convert(::Type{T}, obj::T) where {T <: FunctionWrappersWrapper} = obj
 
 # ============================================================================
 # Call dispatch — entry point

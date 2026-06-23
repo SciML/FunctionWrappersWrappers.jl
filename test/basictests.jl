@@ -243,3 +243,22 @@ end
     # Float32 is isbits mismatch → errors
     @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError fww(4.0f0, 8.0f0)
 end
+
+@testset "Conversion" begin
+    fww_exp = FunctionWrappersWrapper(
+        exp,
+        (Tuple{Float64}, Tuple{Float32}),
+        (Float64, Float32)
+    )
+    FWW = typeof(fww_exp)
+
+    fww_cos = FWW(cos)
+    @test typeof(fww_cos) == FWW
+    @test fww_cos(0.5) == cos(0.5)
+
+    fww_vector = FWW[sin, tan, log]
+    @test eltype(fww_vector) == FWW
+    fww_vector[1](0.5) == sin(0.5)
+    fww_vector[2](0.5) == tan(0.5)
+    fww_vector[3](0.5) == log(0.5)
+end
