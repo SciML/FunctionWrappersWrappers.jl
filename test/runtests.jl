@@ -10,6 +10,7 @@ run_tests(;
             include(joinpath(@__DIR__, "shared", "bigfloat_unionall_tests.jl"))
         end
     end,
+    qa = (; env = joinpath(@__DIR__, "qa"), body = joinpath(@__DIR__, "qa", "qa.jl")),
     groups = Dict(
         "nopre" => (;
             env = joinpath(@__DIR__, "nopre"),
