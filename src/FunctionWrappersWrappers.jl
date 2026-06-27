@@ -1,6 +1,6 @@
 module FunctionWrappersWrappers
 
-using FunctionWrappers
+using FunctionWrappers: FunctionWrappers
 import TruncatedStacktraces
 
 export FunctionWrappersWrapper, unwrap, wrapped_signatures, wrapped_return_types
@@ -303,7 +303,7 @@ end
 # Precompilation
 # ============================================================================
 
-using PrecompileTools
+using PrecompileTools: @compile_workload, @setup_workload
 
 @setup_workload begin
     @compile_workload begin
