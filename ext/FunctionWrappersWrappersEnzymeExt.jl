@@ -154,6 +154,25 @@ end
 # Reverse mode rules
 # =============================================================================
 
+# The Const-return (IIP) reverse rule re-runs `Enzyme.autodiff(Reverse, …)` on
+# the unwrapped function during the *reverse* pass.  That recomputation reads
+# the arguments' current `.val`s — but a caller may mutate those arguments
+# between the forward call and the reverse pass (an ODE integrator steps `u`
+# after every RHS call).  Without snapshotting, the VJP is then taken about the
+# wrong state and the gradient is silently wrong.  `_snapshot`/`_restore!` let
+# the rule pin the call-time argument values in its tape.
+#
+# To keep this cheap, only arguments that Enzyme's `overwritten(config)`
+# analysis flags as possibly modified between the forward and reverse passes
+# are copied; everything else (and immutables like `t`) tapes `nothing` and is
+# never copied.  `overwritten` is a conservative over-approximation, so gating
+# on it can never *miss* an argument that actually needs snapshotting.  A
+# non-mutating call therefore allocates nothing here.
+@inline _snapshot(v::AbstractArray) = copy(v)
+@inline _snapshot(v) = v
+@inline _restore!(dst::AbstractArray, snap::AbstractArray) = (copyto!(dst, snap); nothing)
+@inline _restore!(@nospecialize(dst), @nospecialize(snap)) = nothing
+
 function EnzymeRules.augmented_primal(
         config::EnzymeRules.RevConfig,
         func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
@@ -172,8 +191,12 @@ function EnzymeRules.augmented_primal(
 end
 
 # Const return (e.g. IIP functions returning Nothing, or any non-differentiated
-# return). Just run the primal for its side effects; no tape is needed because
-# the reverse pass has nothing to propagate back from the return.
+# return). Run the primal for its side effects, and snapshot the call-time
+# argument values into the tape so the reverse pass can take the VJP about the
+# state at the time of *this* call — even if the caller mutates the arguments
+# afterwards (the ODE-integrator pattern: `wf(du, u, p, t)` followed by an
+# in-place step on `u`). Snapshot BEFORE running the primal in case `f_orig`
+# mutates its inputs.
 function EnzymeRules.augmented_primal(
         config::EnzymeRules.RevConfig,
         func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
@@ -181,9 +204,12 @@ function EnzymeRules.augmented_primal(
         args::Vararg{EnzymeCore.Annotation, N}
     ) where {N}
     f_orig = unwrap(func.val)
+    # `overwritten` is indexed (func, args...), so arg `i` is entry `i + 1`.
+    ow = EnzymeRules.overwritten(config)
+    tape = ntuple(i -> (ow[i + 1] ? _snapshot(args[i].val) : nothing), Val(N))
     pargs = ntuple(i -> args[i].val, Val(N))
     f_orig(pargs...)
-    return EnzymeRules.AugmentedReturn(nothing, nothing, nothing)
+    return EnzymeRules.AugmentedReturn(nothing, nothing, tape)
 end
 
 # Duplicated / BatchDuplicated return: record the primal so that reverse has
@@ -315,7 +341,16 @@ function EnzymeRules.reverse(
     # Only worth invoking Enzyme.autodiff when at least one arg is
     # Duplicated/BatchDuplicated — otherwise there's nothing to accumulate.
     if any(a -> a isa EnzymeCore.Duplicated || a isa EnzymeCore.BatchDuplicated, args)
+        # Temporarily restore the call-time argument values (snapshotted in the
+        # tape during augmented_primal) so the VJP is taken about the correct
+        # state, then put the live values back so the surrounding reverse pass
+        # is left undisturbed.  Without this, a caller that mutates an argument
+        # after the forward call (an ODE integrator stepping `u`) makes the
+        # recomputation differentiate `f_orig` about the wrong state.
+        live = ntuple(i -> (tape[i] === nothing ? nothing : _snapshot(args[i].val)), Val(N))
+        map((a, snap) -> _restore!(a.val, snap), args, tape)
         Enzyme.autodiff(Reverse, Const(f_orig), Const, args...)
+        map((a, snap) -> _restore!(a.val, snap), args, live)
     end
     return ntuple(Val(N)) do i
         if args[i] isa EnzymeCore.Active
