@@ -175,7 +175,9 @@ end
 
     # Construct a concrete RevConfig. Fields:
     # (NeedsPrimal, NeedsShadow, Width, Overwritten, RuntimeActivity, StrongZero)
-    rconfig = EnzymeRules.RevConfig{false, false, 1, (false, false), false, false}()
+    # Overwritten is indexed (func, args...) — here (func, x, y).  Mark only `x`
+    # as overwritten so we can check the rule snapshots exactly that arg.
+    rconfig = EnzymeRules.RevConfig{false, false, 1, (false, true, false), false, false}()
 
     counter[] = 0
     aug = EnzymeRules.augmented_primal(
@@ -185,7 +187,7 @@ end
     @test counter[] == 1                       # primal ran exactly once
     @test aug.primal === nothing               # NeedsPrimal == false
     @test aug.shadow === nothing
-    @test aug.tape == (3.0, 4.0)               # call-time snapshots of the args
+    @test aug.tape == (3.0, nothing)           # only the overwritten arg (x) is snapshotted
 
     # Reverse step — dret is Const (passed as TYPE not instance in reverse
     # rules).  Enzyme's rule protocol requires concrete gradients for Active
@@ -504,7 +506,8 @@ end
     du = [0.0];       du_shadow = [1.0]
     u = [3.0];       u_shadow = [0.0]
 
-    rconfig = EnzymeRules.RevConfig{false, false, 1, (false, false), false, false}()
+    # Overwritten indexed (func, du, u); none modified between fwd and rev here.
+    rconfig = EnzymeRules.RevConfig{false, false, 1, (false, false, false), false, false}()
     aug = EnzymeRules.augmented_primal(
         rconfig,
         Duplicated(fww, fww),                # <-- Duplicated FWW

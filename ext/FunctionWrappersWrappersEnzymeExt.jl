@@ -161,6 +161,13 @@ end
 # after every RHS call).  Without snapshotting, the VJP is then taken about the
 # wrong state and the gradient is silently wrong.  `_snapshot`/`_restore!` let
 # the rule pin the call-time argument values in its tape.
+#
+# To keep this cheap, only arguments that Enzyme's `overwritten(config)`
+# analysis flags as possibly modified between the forward and reverse passes
+# are copied; everything else (and immutables like `t`) tapes `nothing` and is
+# never copied.  `overwritten` is a conservative over-approximation, so gating
+# on it can never *miss* an argument that actually needs snapshotting.  A
+# non-mutating call therefore allocates nothing here.
 @inline _snapshot(v::AbstractArray) = copy(v)
 @inline _snapshot(v) = v
 @inline _restore!(dst::AbstractArray, snap::AbstractArray) = (copyto!(dst, snap); nothing)
@@ -197,7 +204,9 @@ function EnzymeRules.augmented_primal(
         args::Vararg{EnzymeCore.Annotation, N}
     ) where {N}
     f_orig = unwrap(func.val)
-    tape = ntuple(i -> _snapshot(args[i].val), Val(N))
+    # `overwritten` is indexed (func, args...), so arg `i` is entry `i + 1`.
+    ow = EnzymeRules.overwritten(config)
+    tape = ntuple(i -> (ow[i + 1] ? _snapshot(args[i].val) : nothing), Val(N))
     pargs = ntuple(i -> args[i].val, Val(N))
     f_orig(pargs...)
     return EnzymeRules.AugmentedReturn(nothing, nothing, tape)
@@ -338,7 +347,7 @@ function EnzymeRules.reverse(
         # is left undisturbed.  Without this, a caller that mutates an argument
         # after the forward call (an ODE integrator stepping `u`) makes the
         # recomputation differentiate `f_orig` about the wrong state.
-        live = ntuple(i -> _snapshot(args[i].val), Val(N))
+        live = ntuple(i -> (tape[i] === nothing ? nothing : _snapshot(args[i].val)), Val(N))
         map((a, snap) -> _restore!(a.val, snap), args, tape)
         Enzyme.autodiff(Reverse, Const(f_orig), Const, args...)
         map((a, snap) -> _restore!(a.val, snap), args, live)
