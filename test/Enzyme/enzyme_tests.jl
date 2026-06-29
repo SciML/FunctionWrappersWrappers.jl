@@ -164,9 +164,11 @@ end
 
 @testset "Enzyme reverse mode, Const return — augmented_primal runs primal" begin
     # Mirrors the forward {false, false} case on the reverse side. Augmented
-    # primal runs the wrapped function for its side effects and returns
-    # AugmentedReturn(nothing, nothing, nothing).  Reverse returns `nothing`
-    # per arg since there is no return derivative to propagate.
+    # primal runs the wrapped function for its side effects and tapes a snapshot
+    # of the call-time argument values (so a later mutation by the caller can't
+    # make the reverse pass differentiate about the wrong state).  Reverse
+    # returns `nothing`/zero per arg since there is no return derivative to
+    # propagate.
     counter = Ref(0)
     g(x, y) = (counter[] += 1; x + y)  # returns Float64 (ignored via Const RT)
     fww = FunctionWrappersWrapper(g, (Tuple{Float64, Float64},), (Float64,))
@@ -183,7 +185,7 @@ end
     @test counter[] == 1                       # primal ran exactly once
     @test aug.primal === nothing               # NeedsPrimal == false
     @test aug.shadow === nothing
-    @test aug.tape === nothing
+    @test aug.tape == (3.0, 4.0)               # call-time snapshots of the args
 
     # Reverse step — dret is Const (passed as TYPE not instance in reverse
     # rules).  Enzyme's rule protocol requires concrete gradients for Active
@@ -328,6 +330,74 @@ end
     )
     @test du[1] ≈ 8.0
     @test u_shadow[1] ≈ expected_u_grad
+end
+
+# =============================================================================
+# Regression for the wrong gradient when a wrapped IIP function's arguments are
+# MUTATED AFTER the call — the ODE-integrator pattern that the whole-solve
+# Enzyme adjoint exercises (and the root cause of the EnsembleProblem adjoint
+# failure, SciMLSensitivity.jl#1424).
+#
+# The Const-return reverse rule re-runs `Enzyme.autodiff(Reverse, …)` on the
+# unwrapped function during the reverse pass.  If it differentiates about the
+# arguments' *current* state rather than their *call-time* state, then any
+# caller that steps `u` after the RHS call gets a silently wrong gradient.
+# Before the snapshot/restore tape fix these end-to-end gradients were wrong.
+# =============================================================================
+
+@testset "Enzyme Reverse: IIP wrapper, args mutated after call (single step)" begin
+    f!(du, u, p, t) = (du[1] = p[1] * u[1]; du[2] = p[2] * u[2]^2; nothing)
+    ARGT = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Float64}
+
+    function loss(p)
+        u = [1.5, 2.0]
+        du = zero(u)
+        wf = FunctionWrappersWrapper(f!, (ARGT,), (Nothing,))
+        wf(du, u, p, 0.0)
+        @inbounds for k in 1:2
+            u[k] += 0.05 * du[k]          # mutate u AFTER the wrapped call
+        end
+        return du[1]^2 + du[2]^2          # loss depends on du only
+    end
+
+    p = [0.7, 0.4]
+    # du = [p1*1.5, p2*4];  loss = (1.5 p1)^2 + (4 p2)^2
+    # ∂loss/∂p = [2*1.5^2*p1, 2*4^2*p2] = [4.5 p1, 32 p2]; evaluated at CALL-TIME u
+    g = collect(Enzyme.gradient(Enzyme.set_runtime_activity(Enzyme.Reverse), loss, p)[1])
+    @test g ≈ [4.5 * p[1], 32 * p[2]]
+end
+
+@testset "Enzyme Reverse: IIP wrapper in a multi-step integrator" begin
+    f!(du, u, p, t) = (
+        du[1] = -p[1] * u[1] + p[2] * u[2];
+        du[2] = -p[3] * u[2] + p[4] * u[1]; nothing
+    )
+    ARGT = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Float64}
+
+    function loss(p)
+        u = [1.0, 2.0]
+        du = zero(u)
+        wf = FunctionWrappersWrapper(f!, (ARGT,), (Nothing,))
+        for _ in 1:8
+            wf(du, u, p, 0.0)
+            @inbounds for k in 1:2
+                u[k] += 0.05 * du[k]      # integrator step mutates u each call
+            end
+        end
+        return sum(abs2, u)
+    end
+
+    p = [1.0, 0.5, 2.0, 0.3]
+    g = collect(Enzyme.gradient(Enzyme.set_runtime_activity(Enzyme.Reverse), loss, p)[1])
+
+    # central finite-difference reference (no extra deps)
+    fd = map(eachindex(p)) do i
+        h = 1.0e-6
+        pp = copy(p); pp[i] += h
+        pm = copy(p); pm[i] -= h
+        (loss(pp) - loss(pm)) / (2h)
+    end
+    @test g ≈ fd rtol = 1.0e-4
 end
 
 # =============================================================================
