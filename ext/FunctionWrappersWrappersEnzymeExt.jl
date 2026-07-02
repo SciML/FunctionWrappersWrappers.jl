@@ -154,6 +154,35 @@ end
 # Reverse mode rules
 # =============================================================================
 
+# The Const-return (IIP) reverse rule re-runs `Enzyme.autodiff(Reverse, …)` on
+# the unwrapped function during the *reverse* pass.  That recomputation reads
+# the arguments' current `.val`s — but a caller may mutate those arguments
+# between the forward call and the reverse pass (an ODE integrator steps `u`
+# after every RHS call).  Without snapshotting, the VJP is then taken about the
+# wrong state and the gradient is silently wrong.  `_snapshot`/`_restore!` let
+# the rule pin the call-time argument values in its tape.
+#
+# To keep this cheap, only arguments that Enzyme's `overwritten(config)`
+# analysis flags as possibly modified between the forward and reverse passes
+# are copied; everything else (and immutables like `t`) tapes `nothing` and is
+# never copied.  `overwritten` is a conservative over-approximation, so gating
+# on it can never *miss* an argument that actually needs snapshotting.  A
+# non-mutating call therefore allocates nothing here.
+@inline _snapshot(v::AbstractArray) = copy(v)
+@inline _snapshot(v) = v
+@inline _restore!(dst::AbstractArray, snap::AbstractArray) = (copyto!(dst, snap); nothing)
+@inline _restore!(@nospecialize(dst), @nospecialize(snap)) = nothing
+
+# Build one slot of a reverse rule's return tuple: `nothing` for every
+# non-Active arg (their gradients accumulate in-place), and the concrete
+# gradient for each `Active` arg.  Dispatching on the annotation *type* keeps
+# the resulting tuple exactly typed (e.g. `Tuple{Nothing, Nothing, Float64}`)
+# even though the raw `autodiff`/thunk return is `Any`-typed inside the rule —
+# Enzyme rejects a union-typed return.  `g` is the matching entry of that raw
+# per-argument gradient tuple.
+@inline _revslot(::EnzymeCore.Active{T}, g) where {T} = convert(T, g)::T
+@inline _revslot(::EnzymeCore.Annotation, @nospecialize(g)) = nothing
+
 function EnzymeRules.augmented_primal(
         config::EnzymeRules.RevConfig,
         func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
@@ -172,8 +201,12 @@ function EnzymeRules.augmented_primal(
 end
 
 # Const return (e.g. IIP functions returning Nothing, or any non-differentiated
-# return). Just run the primal for its side effects; no tape is needed because
-# the reverse pass has nothing to propagate back from the return.
+# return). Run the primal for its side effects, and snapshot the call-time
+# argument values into the tape so the reverse pass can take the VJP about the
+# state at the time of *this* call — even if the caller mutates the arguments
+# afterwards (the ODE-integrator pattern: `wf(du, u, p, t)` followed by an
+# in-place step on `u`). Snapshot BEFORE running the primal in case `f_orig`
+# mutates its inputs.
 function EnzymeRules.augmented_primal(
         config::EnzymeRules.RevConfig,
         func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
@@ -181,9 +214,12 @@ function EnzymeRules.augmented_primal(
         args::Vararg{EnzymeCore.Annotation, N}
     ) where {N}
     f_orig = unwrap(func.val)
+    # `overwritten` is indexed (func, args...), so arg `i` is entry `i + 1`.
+    ow = EnzymeRules.overwritten(config)
+    tape = ntuple(i -> (ow[i + 1] ? _snapshot(args[i].val) : nothing), Val(N))
     pargs = ntuple(i -> args[i].val, Val(N))
     f_orig(pargs...)
-    return EnzymeRules.AugmentedReturn(nothing, nothing, nothing)
+    return EnzymeRules.AugmentedReturn(nothing, nothing, tape)
 end
 
 # Duplicated / BatchDuplicated return: record the primal so that reverse has
@@ -299,11 +335,14 @@ end
 # accumulate into any `Duplicated` arg shadow buffers (the SciML IIP
 # pattern).  Simply returning `nothing` left Duplicated shadows at zero.
 #
-# Per Enzyme's rule return-type protocol, `Active` args require a concrete
-# scalar gradient (not `nothing`).  Under a `Const` return there is no
-# gradient source, so Active arg gradients are zero.  `Duplicated` /
-# `BatchDuplicated` args return `nothing` because their gradients are
-# accumulated in-place by the `Enzyme.autodiff(Reverse, …)` call above.
+# `Enzyme.autodiff(Reverse, Const(f_orig), Const, args...)[1]` already returns
+# the per-argument gradient tuple in exactly the form a reverse rule must hand
+# back: `nothing` for each `Const`/`Duplicated`/`BatchDuplicated` arg (their
+# gradients are accumulated in-place), and the concrete gradient for each
+# `Active` arg — with exact per-slot types (Enzyme rejects a union-typed
+# `Tuple{Union{Nothing,Float64},…}`).  So we forward that tuple directly, which
+# also makes `Active` args (e.g. `t` in a time-dependent IIP rhs) correct
+# rather than zeroed.
 function EnzymeRules.reverse(
         config::EnzymeRules.RevConfig,
         func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
@@ -312,18 +351,23 @@ function EnzymeRules.reverse(
         args::Vararg{EnzymeCore.Annotation, N}
     ) where {N}
     f_orig = unwrap(func.val)
-    # Only worth invoking Enzyme.autodiff when at least one arg is
-    # Duplicated/BatchDuplicated — otherwise there's nothing to accumulate.
-    if any(a -> a isa EnzymeCore.Duplicated || a isa EnzymeCore.BatchDuplicated, args)
-        Enzyme.autodiff(Reverse, Const(f_orig), Const, args...)
+    # Nothing to do if every argument is Const.
+    if any(a -> !(a isa EnzymeCore.Const), args)
+        # Temporarily restore the call-time argument values (snapshotted in the
+        # tape during augmented_primal) so the VJP is taken about the correct
+        # state, then put the live values back so the surrounding reverse pass
+        # is left undisturbed.  Without this, a caller that mutates an argument
+        # after the forward call (an ODE integrator stepping `u`) makes the
+        # recomputation differentiate `f_orig` about the wrong state.
+        live = ntuple(i -> (tape[i] === nothing ? nothing : _snapshot(args[i].val)), Val(N))
+        map((a, snap) -> _restore!(a.val, snap), args, tape)
+        raw = Enzyme.autodiff(Reverse, Const(f_orig), Const, args...)[1]::NTuple{N, Any}
+        map((a, snap) -> _restore!(a.val, snap), args, live)
+        # `map` over tuples specialises per element, so dispatching `_revslot`
+        # on each arg's concrete annotation type yields an exactly-typed result.
+        return map(_revslot, args, raw)
     end
-    return ntuple(Val(N)) do i
-        if args[i] isa EnzymeCore.Active
-            zero(eltype(typeof(args[i])))
-        else
-            nothing
-        end
-    end
+    return ntuple(_ -> nothing, Val(N))
 end
 
 end
