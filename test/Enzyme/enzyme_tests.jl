@@ -402,6 +402,33 @@ end
     @test g ≈ fd rtol = 1.0e-4
 end
 
+@testset "Enzyme Reverse: IIP wrapper with a mix of Duplicated and Active args" begin
+    # A time-dependent in-place rhs, differentiated so the reverse rule sees
+    # (Duplicated du, Duplicated u, Duplicated p, Active t).  The rule must
+    # return the *real* gradient for the Active `t` with an exact-typed tuple
+    # (Nothing per Duplicated arg, Float64 for the Active).  Before the fix this
+    # returned a union-typed `(nothing, …, 0.0)` — Enzyme rejected it with a
+    # `ReverseRuleReturnError`, and the `t`-gradient was zeroed rather than
+    # computed.
+    f!(du, u, p, t) = (du[1] = p[1] * u[1] + t * u[2]; du[2] = p[2] * u[2]; nothing)
+    ARGT = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Float64}
+
+    function loss(x)              # x = [p1, p2, t]
+        u = [1.5, 2.0]
+        du = zero(u)
+        wf = FunctionWrappersWrapper(f!, (ARGT,), (Nothing,))
+        wf(du, u, [x[1], x[2]], x[3])   # t = x[3] flows in as an Active scalar
+        return du[1]^2 + du[2]^2
+    end
+
+    x = [0.7, 0.4, 0.9]
+    g = collect(Enzyme.gradient(Enzyme.set_runtime_activity(Enzyme.Reverse), loss, x)[1])
+    # du = [p1*u1 + t*u2, p2*u2]; loss = du1^2 + du2^2
+    du1 = x[1] * 1.5 + x[3] * 2.0
+    du2 = x[2] * 2.0
+    @test g ≈ [2 * du1 * 1.5, 2 * du2 * 2.0, 2 * du1 * 2.0]   # ∂/∂t = 2*du1*u2 ≠ 0
+end
+
 # =============================================================================
 # Runtime-activity propagation through the FWW forward rules.
 #
