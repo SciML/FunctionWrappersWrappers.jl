@@ -164,26 +164,29 @@ end
 
 @testset "Enzyme reverse mode, Const return — augmented_primal runs primal" begin
     # Mirrors the forward {false, false} case on the reverse side. Augmented
-    # primal runs the wrapped function for its side effects and returns
-    # AugmentedReturn(nothing, nothing, nothing).  Reverse returns `nothing`
-    # per arg since there is no return derivative to propagate.
+    # primal delegates to a split reverse-mode thunk on the unwrapped function:
+    # it runs the forward pass once (which executes the primal for its side
+    # effects) and stashes `(enzyme_tape, reverse_thunk)` so the reverse rule
+    # can run the matching reverse pass.  Reverse returns `nothing`/zero per arg
+    # since there is no return derivative to propagate.
     counter = Ref(0)
     g(x, y) = (counter[] += 1; x + y)  # returns Float64 (ignored via Const RT)
     fww = FunctionWrappersWrapper(g, (Tuple{Float64, Float64},), (Float64,))
 
     # Construct a concrete RevConfig. Fields:
     # (NeedsPrimal, NeedsShadow, Width, Overwritten, RuntimeActivity, StrongZero)
-    rconfig = EnzymeRules.RevConfig{false, false, 1, (false, false), false, false}()
+    # Overwritten is indexed (func, args...) — here (func, x, y).
+    rconfig = EnzymeRules.RevConfig{false, false, 1, (false, true, false), false, false}()
 
     counter[] = 0
     aug = EnzymeRules.augmented_primal(
         rconfig, Const(fww), EnzymeCore.Const{Float64},
         Active(3.0), Active(4.0)
     )
-    @test counter[] == 1                       # primal ran exactly once
+    @test counter[] == 1                       # primal ran exactly once (forward pass)
     @test aug.primal === nothing               # NeedsPrimal == false
     @test aug.shadow === nothing
-    @test aug.tape === nothing
+    @test length(aug.tape) == 2                # (enzyme_tape, reverse_thunk)
 
     # Reverse step — dret is Const (passed as TYPE not instance in reverse
     # rules).  Enzyme's rule protocol requires concrete gradients for Active
@@ -331,6 +334,101 @@ end
 end
 
 # =============================================================================
+# Regression for the wrong gradient when a wrapped IIP function's arguments are
+# MUTATED AFTER the call — the ODE-integrator pattern that the whole-solve
+# Enzyme adjoint exercises (and the root cause of the EnsembleProblem adjoint
+# failure, SciMLSensitivity.jl#1424).
+#
+# The Const-return reverse rule re-runs `Enzyme.autodiff(Reverse, …)` on the
+# unwrapped function during the reverse pass.  If it differentiates about the
+# arguments' *current* state rather than their *call-time* state, then any
+# caller that steps `u` after the RHS call gets a silently wrong gradient.
+# Before the snapshot/restore tape fix these end-to-end gradients were wrong.
+# =============================================================================
+
+@testset "Enzyme Reverse: IIP wrapper, args mutated after call (single step)" begin
+    f!(du, u, p, t) = (du[1] = p[1] * u[1]; du[2] = p[2] * u[2]^2; nothing)
+    ARGT = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Float64}
+
+    function loss(p)
+        u = [1.5, 2.0]
+        du = zero(u)
+        wf = FunctionWrappersWrapper(f!, (ARGT,), (Nothing,))
+        wf(du, u, p, 0.0)
+        @inbounds for k in 1:2
+            u[k] += 0.05 * du[k]          # mutate u AFTER the wrapped call
+        end
+        return du[1]^2 + du[2]^2          # loss depends on du only
+    end
+
+    p = [0.7, 0.4]
+    # du = [p1*1.5, p2*4];  loss = (1.5 p1)^2 + (4 p2)^2
+    # ∂loss/∂p = [2*1.5^2*p1, 2*4^2*p2] = [4.5 p1, 32 p2]; evaluated at CALL-TIME u
+    g = collect(Enzyme.gradient(Enzyme.set_runtime_activity(Enzyme.Reverse), loss, p)[1])
+    @test g ≈ [4.5 * p[1], 32 * p[2]]
+end
+
+@testset "Enzyme Reverse: IIP wrapper in a multi-step integrator" begin
+    f!(du, u, p, t) = (
+        du[1] = -p[1] * u[1] + p[2] * u[2];
+        du[2] = -p[3] * u[2] + p[4] * u[1]; nothing
+    )
+    ARGT = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Float64}
+
+    function loss(p)
+        u = [1.0, 2.0]
+        du = zero(u)
+        wf = FunctionWrappersWrapper(f!, (ARGT,), (Nothing,))
+        for _ in 1:8
+            wf(du, u, p, 0.0)
+            @inbounds for k in 1:2
+                u[k] += 0.05 * du[k]      # integrator step mutates u each call
+            end
+        end
+        return sum(abs2, u)
+    end
+
+    p = [1.0, 0.5, 2.0, 0.3]
+    g = collect(Enzyme.gradient(Enzyme.set_runtime_activity(Enzyme.Reverse), loss, p)[1])
+
+    # central finite-difference reference (no extra deps)
+    fd = map(eachindex(p)) do i
+        h = 1.0e-6
+        pp = copy(p); pp[i] += h
+        pm = copy(p); pm[i] -= h
+        (loss(pp) - loss(pm)) / (2h)
+    end
+    @test g ≈ fd rtol = 1.0e-4
+end
+
+@testset "Enzyme Reverse: IIP wrapper with a mix of Duplicated and Active args" begin
+    # A time-dependent in-place rhs, differentiated so the reverse rule sees
+    # (Duplicated du, Duplicated u, Duplicated p, Active t).  The rule must
+    # return the *real* gradient for the Active `t` with an exact-typed tuple
+    # (Nothing per Duplicated arg, Float64 for the Active).  Before the fix this
+    # returned a union-typed `(nothing, …, 0.0)` — Enzyme rejected it with a
+    # `ReverseRuleReturnError`, and the `t`-gradient was zeroed rather than
+    # computed.
+    f!(du, u, p, t) = (du[1] = p[1] * u[1] + t * u[2]; du[2] = p[2] * u[2]; nothing)
+    ARGT = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Float64}
+
+    function loss(x)              # x = [p1, p2, t]
+        u = [1.5, 2.0]
+        du = zero(u)
+        wf = FunctionWrappersWrapper(f!, (ARGT,), (Nothing,))
+        wf(du, u, [x[1], x[2]], x[3])   # t = x[3] flows in as an Active scalar
+        return du[1]^2 + du[2]^2
+    end
+
+    x = [0.7, 0.4, 0.9]
+    g = collect(Enzyme.gradient(Enzyme.set_runtime_activity(Enzyme.Reverse), loss, x)[1])
+    # du = [p1*u1 + t*u2, p2*u2]; loss = du1^2 + du2^2
+    du1 = x[1] * 1.5 + x[3] * 2.0
+    du2 = x[2] * 2.0
+    @test g ≈ [2 * du1 * 1.5, 2 * du2 * 2.0, 2 * du1 * 2.0]   # ∂/∂t = 2*du1*u2 ≠ 0
+end
+
+# =============================================================================
 # Runtime-activity propagation through the FWW forward rules.
 #
 # Prior to this fix the rules hard-coded plain `Forward` when delegating to
@@ -434,7 +532,8 @@ end
     du = [0.0];       du_shadow = [1.0]
     u = [3.0];       u_shadow = [0.0]
 
-    rconfig = EnzymeRules.RevConfig{false, false, 1, (false, false), false, false}()
+    # Overwritten indexed (func, du, u); none modified between fwd and rev here.
+    rconfig = EnzymeRules.RevConfig{false, false, 1, (false, false, false), false, false}()
     aug = EnzymeRules.augmented_primal(
         rconfig,
         Duplicated(fww, fww),                # <-- Duplicated FWW
