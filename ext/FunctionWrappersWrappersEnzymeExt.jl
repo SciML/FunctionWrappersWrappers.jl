@@ -154,6 +154,26 @@ end
 # Reverse mode rules
 # =============================================================================
 
+# A `ReverseSplitNoPrimal` mode reflecting the rule's RevConfig runtime-activity
+# / strong-zero flags, so the split thunk we delegate to inherits the caller's
+# outer settings.
+@inline function _rev_split_mode(config::EnzymeRules.RevConfig)
+    mode = Enzyme.ReverseSplitNoPrimal
+    EnzymeRules.runtime_activity(config) && (mode = Enzyme.set_runtime_activity(mode))
+    EnzymeRules.strong_zero(config) && (mode = Enzyme.set_strong_zero(mode))
+    return mode
+end
+
+# Build one slot of a reverse rule's return tuple: `nothing` for every
+# non-Active arg (their gradients accumulate in-place), and the concrete
+# gradient for each `Active` arg.  Dispatching on the annotation *type* keeps
+# the resulting tuple exactly typed (e.g. `Tuple{Nothing, Nothing, Float64}`)
+# even though the raw `autodiff`/thunk return is `Any`-typed inside the rule —
+# Enzyme rejects a union-typed return.  `g` is the matching entry of that raw
+# per-argument gradient tuple.
+@inline _revslot(::EnzymeCore.Active{T}, g) where {T} = convert(T, g)::T
+@inline _revslot(::EnzymeCore.Annotation, @nospecialize(g)) = nothing
+
 function EnzymeRules.augmented_primal(
         config::EnzymeRules.RevConfig,
         func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
@@ -172,8 +192,13 @@ function EnzymeRules.augmented_primal(
 end
 
 # Const return (e.g. IIP functions returning Nothing, or any non-differentiated
-# return). Just run the primal for its side effects; no tape is needed because
-# the reverse pass has nothing to propagate back from the return.
+# return). Delegate to a split reverse-mode thunk on the *unwrapped* function so
+# Enzyme differentiates it directly, exactly as it would if the function were
+# never wrapped. We forward the rule's `overwritten` flags as the thunk's
+# `ModifiedBetween`, so Enzyme's own tape caches any argument the caller mutates
+# before the reverse pass (the ODE-integrator pattern: `wf(du, u, p, t)` then an
+# in-place step on `u`). The forward thunk's tape and the reverse thunk are
+# stashed for the reverse rule.
 function EnzymeRules.augmented_primal(
         config::EnzymeRules.RevConfig,
         func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
@@ -181,9 +206,14 @@ function EnzymeRules.augmented_primal(
         args::Vararg{EnzymeCore.Annotation, N}
     ) where {N}
     f_orig = unwrap(func.val)
-    pargs = ntuple(i -> args[i].val, Val(N))
-    f_orig(pargs...)
-    return EnzymeRules.AugmentedReturn(nothing, nothing, nothing)
+    mode = Enzyme.ReverseSplitModified(
+        _rev_split_mode(config), Val(EnzymeRules.overwritten(config))
+    )
+    fwd_thunk, rev_thunk = Enzyme.autodiff_thunk(
+        mode, EnzymeCore.Const{typeof(f_orig)}, EnzymeCore.Const, map(typeof, args)...
+    )
+    tape = fwd_thunk(EnzymeCore.Const(f_orig), args...)[1]
+    return EnzymeRules.AugmentedReturn(nothing, nothing, (tape, rev_thunk))
 end
 
 # Duplicated / BatchDuplicated return: record the primal so that reverse has
@@ -296,14 +326,15 @@ end
 # Const return — Enzyme passes the RT as a `Type{<:Const}` to `reverse`, not
 # as an instance.  Delegate the reverse pass to
 # `Enzyme.autodiff(Reverse, Const(f_orig), Const, args...)` so gradients
-# accumulate into any `Duplicated` arg shadow buffers (the SciML IIP
-# pattern).  Simply returning `nothing` left Duplicated shadows at zero.
+# accumulate into any `Duplicated` arg shadow buffers (the SciML IIP pattern).
 #
-# Per Enzyme's rule return-type protocol, `Active` args require a concrete
-# scalar gradient (not `nothing`).  Under a `Const` return there is no
-# gradient source, so Active arg gradients are zero.  `Duplicated` /
-# `BatchDuplicated` args return `nothing` because their gradients are
-# accumulated in-place by the `Enzyme.autodiff(Reverse, …)` call above.
+# The reverse thunk stashed by `augmented_primal` reads its cached tape (which
+# already captured any `ModifiedBetween` args) and accumulates gradients into
+# the `Duplicated` arg shadows in place; its `[1]` return is the per-argument
+# gradient tuple.  We rebuild that through `map(_revslot, …)` so it is exactly
+# typed (Enzyme rejects a union-typed `Tuple{Union{Nothing,Float64},…}`), which
+# also makes `Active` args (e.g. `t` in a time-dependent IIP rhs) correct rather
+# than zeroed.
 function EnzymeRules.reverse(
         config::EnzymeRules.RevConfig,
         func::EnzymeCore.Annotation{<:FunctionWrappersWrapper},
@@ -312,18 +343,11 @@ function EnzymeRules.reverse(
         args::Vararg{EnzymeCore.Annotation, N}
     ) where {N}
     f_orig = unwrap(func.val)
-    # Only worth invoking Enzyme.autodiff when at least one arg is
-    # Duplicated/BatchDuplicated — otherwise there's nothing to accumulate.
-    if any(a -> a isa EnzymeCore.Duplicated || a isa EnzymeCore.BatchDuplicated, args)
-        Enzyme.autodiff(Reverse, Const(f_orig), Const, args...)
-    end
-    return ntuple(Val(N)) do i
-        if args[i] isa EnzymeCore.Active
-            zero(eltype(typeof(args[i])))
-        else
-            nothing
-        end
-    end
+    tape_data, rev_thunk = tape
+    raw = rev_thunk(EnzymeCore.Const(f_orig), args..., tape_data)[1]::NTuple{N, Any}
+    # `map` over tuples specialises per element, so dispatching `_revslot` on
+    # each arg's concrete annotation type yields an exactly-typed result.
+    return map(_revslot, args, raw)
 end
 
 end
