@@ -15,25 +15,38 @@ abstract type AbstractCacheMode end
 """
     NoCache()
 
-No caching — every fallback call goes through dynamic dispatch (`obj[](arg...)`),
-incurring 1 allocation per call.
+Disable fallback wrapper caching.
+
+Fallback calls use dynamic dispatch through the original function each time.
+
+# Returns
+- `NoCache`: A cache mode for `FunctionWrappersWrapper`.
 """
 struct NoCache <: AbstractCacheMode end
 
 """
     SingleCache()
 
-Cache a single `FunctionWrapper` for the last-seen argument types. After the first
-fallback call, subsequent calls with the same types are zero-allocation. If called with
-different types, the cache is replaced (1 alloc on miss). This is the recommended default.
+Cache one fallback `FunctionWrapper` for the most recent argument tuple type.
+
+Repeated fallback calls with the same argument tuple type reuse the cached
+wrapper. Calls with a different tuple type replace the cache entry.
+
+# Returns
+- `SingleCache`: A cache mode for `FunctionWrappersWrapper`.
 """
 struct SingleCache <: AbstractCacheMode end
 
 """
     DictCache()
 
-Cache `FunctionWrapper`s in a `Dict` keyed by argument type. Handles multiple
-non-isbits types without thrashing. Slightly higher lookup overhead than `SingleCache`.
+Cache fallback `FunctionWrapper`s in a dictionary keyed by argument tuple type.
+
+Use this mode when fallback calls are expected for several different
+non-isbits argument tuple types.
+
+# Returns
+- `DictCache`: A cache mode for `FunctionWrappersWrapper`.
 """
 struct DictCache <: AbstractCacheMode end
 
@@ -45,24 +58,37 @@ abstract type AbstractFallbackPolicy end
 """
     Strict()
 
-Never fall back — throw `NoFunctionWrapperFoundError` if no wrapper matches.
+Disable fallback calls.
+
+If no wrapped signature matches a call, `FunctionWrappersWrapper` throws a
+`NoFunctionWrapperFoundError`.
+
+# Returns
+- `Strict`: A fallback policy for `FunctionWrappersWrapper`.
 """
 struct Strict <: AbstractFallbackPolicy end
 
 """
     AllowAll()
 
-Always fall back to the original function when no wrapper matches.
+Always call the original function when no wrapped signature matches.
+
+# Returns
+- `AllowAll`: A fallback policy for `FunctionWrappersWrapper`.
 """
 struct AllowAll <: AbstractFallbackPolicy end
 
 """
     AllowNonIsBits()
 
-Fall back only when argument types contain non-isbits elements (e.g., `BigFloat`,
-`SparseConnectivityTracer` types). Throws `NoFunctionWrapperFoundError` for isbits
-type mismatches (e.g., `Float32` when `Float64` was expected), which catches bugs.
-This is the recommended default.
+Call the original function only when a mismatched argument tuple contains
+non-isbits element types.
+
+This policy keeps isbits type mismatches strict, while still supporting
+non-isbits values such as `BigFloat` and tracer types.
+
+# Returns
+- `AllowNonIsBits`: A fallback policy for `FunctionWrappersWrapper`.
 """
 struct AllowNonIsBits <: AbstractFallbackPolicy end
 
@@ -90,14 +116,20 @@ _make_cache_storage(::DictCache) = DictCacheStorage()
 """
     FunctionWrappersWrapper{FW, P, CS}
 
-A wrapper around a tuple of `FunctionWrapper`s that dispatches calls to the
-matching wrapper based on argument types. When no wrapper matches, behavior is
-controlled by the fallback policy `P` and cache mode `CS`.
+A callable wrapper around one or more `FunctionWrappers.FunctionWrapper`s.
 
-# Type parameters
-- `FW`: Tuple type of `FunctionWrapper`s
-- `P`: Fallback policy (`Strict`, `AllowAll`, or `AllowNonIsBits`)
-- `CS`: Cache storage type (`NoCacheStorage`, `SingleCacheStorage`, `DictCacheStorage`)
+Calls dispatch to the wrapped signature matching the argument tuple type. If no
+signature matches, fallback behavior is determined by policy `P` and cache
+storage `CS`.
+
+# Fields
+- `fw`: Tuple of `FunctionWrappers.FunctionWrapper`s.
+- `cache_storage`: Storage used by the fallback path.
+
+# Type Parameters
+- `FW`: Tuple type of the wrapped `FunctionWrapper`s.
+- `P`: Fallback policy type, such as `Strict`, `AllowAll`, or `AllowNonIsBits`.
+- `CS`: Cache storage type selected from the cache mode.
 """
 struct FunctionWrappersWrapper{FW, P, CS}
     fw::FW
@@ -114,15 +146,18 @@ TruncatedStacktraces.@truncate_stacktrace FunctionWrappersWrapper
 """
     FunctionWrappersWrapper{FW, P, CS}(f)
 
-Create a `FunctionWrappersWrapper` when the type parameters are specified.
+Create a `FunctionWrappersWrapper` with explicit type parameters.
 
 # Arguments
-- `f`: The function to wrap
+- `f`: Function to wrap.
 
-# Type parameters
-- `FW`: Tuple type of `FunctionWrapper`s
-- `P`: Fallback policy (`Strict`, `AllowAll`, or `AllowNonIsBits`)
-- `CS`: Cache storage type (`NoCacheStorage`, `SingleCacheStorage`, `DictCacheStorage`)
+# Type Parameters
+- `FW`: Tuple type of the wrapped `FunctionWrapper`s.
+- `P`: Fallback policy type, such as `Strict`, `AllowAll`, or `AllowNonIsBits`.
+- `CS`: Cache storage type selected from the cache mode.
+
+# Returns
+- `FunctionWrappersWrapper{FW, P, CS}`: A callable wrapper around `f`.
 """
 function FunctionWrappersWrapper{FW, P, CS}(f) where {K, FW <: NTuple{K, Any}, P, CS}
     fw = ntuple(i -> FW.parameters[i](f), Val(K))
@@ -133,16 +168,27 @@ end
 """
     FunctionWrappersWrapper(f, argtypes, rettypes; cache=SingleCache(), policy=AllowNonIsBits())
 
-Create a `FunctionWrappersWrapper` with configurable fallback behavior.
+Create a callable wrapper for `f` over the given argument and return types.
 
 # Arguments
-- `f`: The function to wrap
-- `argtypes`: Tuple of argument type signatures (e.g., `(Tuple{Float64, Float64},)`)
-- `rettypes`: Tuple of return types (e.g., `(Float64,)`)
+- `f`: Function to wrap.
+- `argtypes`: Tuple of argument tuple types, such as `(Tuple{Float64, Float64},)`.
+- `rettypes`: Tuple of return types corresponding to `argtypes`, such as `(Float64,)`.
 
-# Keywords
-- `cache`: Cache mode for fallback path — `NoCache()`, `SingleCache()` (default), or `DictCache()`
-- `policy`: Fallback policy — `Strict()`, `AllowAll()`, or `AllowNonIsBits()` (default)
+# Keyword Arguments
+- `cache`: Fallback cache mode. Defaults to `SingleCache()`.
+- `policy`: Fallback policy. Defaults to `AllowNonIsBits()`.
+
+# Returns
+- `FunctionWrappersWrapper`: A callable wrapper around `f`.
+
+# Examples
+```jldoctest
+julia> fw = FunctionWrappersWrapper(+, (Tuple{Float64, Float64},), (Float64,));
+
+julia> fw(1.0, 2.0)
+3.0
+```
 """
 function FunctionWrappersWrapper(
         f::F, argtypes::Tuple{Vararg{Any, K}}, rettypes::Tuple{Vararg{Type, K}};
@@ -278,6 +324,12 @@ end
     unwrap(fww::FunctionWrappersWrapper)
 
 Return the original function that was wrapped.
+
+# Arguments
+- `fww`: Wrapper to inspect.
+
+# Returns
+- The function captured by `fww`.
 """
 unwrap(fww::FunctionWrappersWrapper) = first(fww.fw).obj[]
 
@@ -285,6 +337,12 @@ unwrap(fww::FunctionWrappersWrapper) = first(fww.fw).obj[]
     wrapped_signatures(fww::FunctionWrappersWrapper)
 
 Return a tuple of the argument type signatures that the wrapper can dispatch on.
+
+# Arguments
+- `fww`: Wrapper to inspect.
+
+# Returns
+- A tuple of argument tuple types stored in `fww`.
 """
 function wrapped_signatures(fww::FunctionWrappersWrapper)
     return map(fw -> typeof(fw).parameters[2], fww.fw)
@@ -294,6 +352,12 @@ end
     wrapped_return_types(fww::FunctionWrappersWrapper)
 
 Return a tuple of the return types for each wrapped function signature.
+
+# Arguments
+- `fww`: Wrapper to inspect.
+
+# Returns
+- A tuple of return types corresponding to `wrapped_signatures(fww)`.
 """
 function wrapped_return_types(fww::FunctionWrappersWrapper)
     return map(fw -> typeof(fw).parameters[1], fww.fw)
