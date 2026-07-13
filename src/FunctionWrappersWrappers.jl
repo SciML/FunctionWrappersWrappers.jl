@@ -283,6 +283,47 @@ function FunctionWrappersWrapper(
     return FunctionWrappersWrapper{typeof(fwt), typeof(policy), typeof(cs)}(fwt, cs)
 end
 
+"""
+    FunctionWrappersWrapper(fw::Tuple{Vararg{FunctionWrappers.FunctionWrapper}}; cache=SingleCache(), policy=AllowNonIsBits())
+
+Create a callable wrapper from already-constructed `FunctionWrapper`s.
+
+Use this when the `FunctionWrapper`s must be built by the caller, for instance to keep
+construction inferrable: the `argtypes`/`rettypes` method takes its types as values, so the
+wrapper type is only inferred when those values constant-propagate. Building `fw` with the
+signatures bound as type parameters and passing it here keeps `typeof(fww)` concrete.
+
+# Arguments
+- `fw`: Tuple of `FunctionWrappers.FunctionWrapper`s, tried in order on call.
+
+# Keyword Arguments
+- `cache`: Fallback cache mode. Defaults to `SingleCache()`.
+- `policy`: Fallback policy. Defaults to `AllowNonIsBits()`.
+
+# Returns
+- `FunctionWrappersWrapper`: A callable wrapper around `fw`.
+
+# Examples
+```jldoctest
+julia> using FunctionWrappers: FunctionWrapper
+
+julia> fw = (FunctionWrapper{Float64, Tuple{Float64, Float64}}(+),);
+
+julia> fww = FunctionWrappersWrapper(fw);
+
+julia> fww(1.0, 2.0)
+3.0
+```
+"""
+function FunctionWrappersWrapper(
+        fw::Tuple{Vararg{FunctionWrappers.FunctionWrapper}};
+        cache::AbstractCacheMode = SingleCache(),
+        policy::AbstractFallbackPolicy = AllowNonIsBits()
+    )
+    cs = _make_cache_storage(cache)
+    return FunctionWrappersWrapper{typeof(fw), typeof(policy), typeof(cs)}(fw, cs)
+end
+
 Base.convert(::Type{T}, obj) where {T <: FunctionWrappersWrapper} = T(obj)
 Base.convert(::Type{T}, obj::T) where {T <: FunctionWrappersWrapper} = obj
 

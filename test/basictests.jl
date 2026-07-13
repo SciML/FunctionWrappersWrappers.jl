@@ -244,6 +244,38 @@ end
     @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError fww(4.0f0, 8.0f0)
 end
 
+@testset "Construction from FunctionWrappers" begin
+    using FunctionWrappers: FunctionWrapper
+
+    fw = (
+        FunctionWrapper{Float64, Tuple{Float64, Float64}}(+),
+        FunctionWrapper{Int, Tuple{Int, Int}}(+),
+    )
+    argtypes = (Tuple{Float64, Float64}, Tuple{Int, Int})
+    rettypes = (Float64, Int)
+
+    fww = FunctionWrappersWrapper(fw)
+    @test fww(4.0, 8.0) === 12.0
+    @test fww(4, 8) === 12
+    # Same wrapper the argtypes/rettypes constructor builds, defaults included
+    @test typeof(fww) === typeof(FunctionWrappersWrapper(+, argtypes, rettypes))
+
+    strict = FunctionWrappersWrapper(fw; policy = Strict(), cache = NoCache())
+    @test typeof(strict) === typeof(
+        FunctionWrappersWrapper(
+            +, argtypes, rettypes; policy = Strict(), cache = NoCache()
+        )
+    )
+    @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError strict(
+        BigFloat(4), BigFloat(8)
+    )
+
+    # The point of this constructor: the wrapper type stays concrete even when the
+    # wrapped callable is opaque to inference.
+    make(f) = FunctionWrappersWrapper((FunctionWrapper{Float64, Tuple{Float64}}(f),))
+    @test isconcretetype(only(Base.return_types(make, (Function,))))
+end
+
 @testset "Conversion" begin
     fww_exp = FunctionWrappersWrapper(
         exp,
