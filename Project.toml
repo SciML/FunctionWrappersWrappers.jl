@@ -18,7 +18,7 @@ FunctionWrappersWrappersEnzymeExt = ["Enzyme", "EnzymeCore"]
 FunctionWrappersWrappersMooncakeExt = "Mooncake"
 
 [compat]
-Enzyme = "0.13"
+Enzyme = "0.13.185"
 EnzymeCore = "0.8"
 FunctionWrappers = "1.1.2"
 Mooncake = "0.5"
