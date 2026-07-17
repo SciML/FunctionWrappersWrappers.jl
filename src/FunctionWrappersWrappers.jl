@@ -1,6 +1,7 @@
 module FunctionWrappersWrappers
 
 using FunctionWrappers: FunctionWrappers
+using SciMLPublic: @public
 import TruncatedStacktraces
 
 export FunctionWrappersWrapper, unwrap, wrapped_signatures, wrapped_return_types
@@ -96,10 +97,38 @@ struct AllowNonIsBits <: AbstractFallbackPolicy end
 # Cache storage types
 # ============================================================================
 struct NoCacheStorage end
+
+"""
+    SingleCacheStorage()
+
+Storage for the `SingleCache()` fallback mode.
+
+`SingleCacheStorage` stores one fallback `FunctionWrappers.FunctionWrapper`
+for the most recent argument tuple type. It is public so downstream packages
+that manually construct `FunctionWrappersWrapper` values can select the same
+single-entry cache layout used by `FunctionWrappersWrapper(...; cache = SingleCache())`.
+
+# Examples
+
+```julia
+using FunctionWrappersWrappers
+
+storage = FunctionWrappersWrappers.SingleCacheStorage()
+wrapper = FunctionWrappersWrapper(sin, (Tuple{Float64},), (Float64,);
+    cache = SingleCache())
+
+wrapper(1.0)
+```
+
+# Returns
+- `SingleCacheStorage`: Empty storage for one cached fallback wrapper.
+"""
 mutable struct SingleCacheStorage
     cached::Any  # Union{Nothing, FunctionWrapper}
     SingleCacheStorage() = new(nothing)
 end
+@public SingleCacheStorage
+
 struct DictCacheStorage
     cache::Dict{DataType, Any}
     DictCacheStorage() = new(Dict{DataType, Any}())
