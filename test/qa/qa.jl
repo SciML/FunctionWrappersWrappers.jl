@@ -14,5 +14,4 @@ run_qa(
             ignore = (:tail, :FunctionWrapper, Symbol("@truncate_stacktrace")),
         ),
     ),
-    api_docs_kwargs = (; rendered = true),
 )

@@ -151,6 +151,36 @@ end
     end
 end
 
+@testset "Public fallback configuration interface" begin
+    modes = (NoCache(), SingleCache(), DictCache())
+
+    for cache in modes
+        @testset "$(typeof(cache))" begin
+            strict = FunctionWrappersWrapper(
+                identity, (Tuple{Float64},), (Float64,); cache, policy = Strict()
+            )
+            @test strict(1.0) === 1.0
+            @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError strict(1.0f0)
+
+            allow_all = FunctionWrappersWrapper(
+                identity, (Tuple{Float64},), (Float64,); cache, policy = AllowAll()
+            )
+            @test allow_all(1.0) === 1.0
+            @test allow_all(1.0f0) === 1.0f0
+
+            allow_non_isbits = FunctionWrappersWrapper(
+                identity, (Tuple{Float64},), (Float64,); cache,
+                policy = AllowNonIsBits()
+            )
+            @test allow_non_isbits(1.0) === 1.0
+            @test_throws FunctionWrappersWrappers.NoFunctionWrapperFoundError allow_non_isbits(
+                1.0f0
+            )
+            @test allow_non_isbits(big(1)) == big(1)
+        end
+    end
+end
+
 @testset "Cache modes" begin
     f!(du, u, p, t) = (du[1] = p[1] * u[1]; nothing)
 
