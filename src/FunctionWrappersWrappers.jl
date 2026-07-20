@@ -96,6 +96,29 @@ struct AllowNonIsBits <: AbstractFallbackPolicy end
 # ============================================================================
 # Cache storage types
 # ============================================================================
+"""
+    NoCacheStorage()
+
+Storage marker for the `NoCache()` fallback mode.
+
+`NoCacheStorage` carries no state. Use this type when constructing or
+inspecting a `FunctionWrappersWrapper` whose fallback path should dispatch
+through the original function without caching generated
+`FunctionWrappers.FunctionWrapper`s.
+
+# Examples
+
+```julia
+using FunctionWrappersWrappers
+
+wrapper = FunctionWrappersWrapper(sin, (Tuple{Float64},), (Float64,);
+    cache = NoCache(), policy = AllowAll())
+storage = FunctionWrappersWrappers.NoCacheStorage()
+```
+
+# Returns
+- `NoCacheStorage`: Empty storage marker for uncached fallback calls.
+"""
 struct NoCacheStorage end
 
 """
@@ -104,21 +127,23 @@ struct NoCacheStorage end
 Storage for the `SingleCache()` fallback mode.
 
 `SingleCacheStorage` stores one fallback `FunctionWrappers.FunctionWrapper`
-for the most recent argument tuple type. It is public so downstream packages
-that manually construct `FunctionWrappersWrapper` values can select the same
-single-entry cache layout used by `FunctionWrappersWrapper(...; cache = SingleCache())`.
+for the most recent argument tuple type. Use this type when constructing or
+inspecting a `FunctionWrappersWrapper` that should reuse a single cached
+fallback wrapper before replacing it on a different fallback argument tuple
+type.
 
 # Examples
 
 ```julia
 using FunctionWrappersWrappers
 
-storage = FunctionWrappersWrappers.SingleCacheStorage()
 wrapper = FunctionWrappersWrapper(sin, (Tuple{Float64},), (Float64,);
-    cache = SingleCache())
-
-wrapper(1.0)
+    cache = SingleCache(), policy = AllowAll())
+storage = FunctionWrappersWrappers.SingleCacheStorage()
 ```
+
+# Fields
+- `cached`: The cached fallback wrapper, or `nothing` before fallback is used.
 
 # Returns
 - `SingleCacheStorage`: Empty storage for one cached fallback wrapper.
@@ -127,12 +152,39 @@ mutable struct SingleCacheStorage
     cached::Any  # Union{Nothing, FunctionWrapper}
     SingleCacheStorage() = new(nothing)
 end
-@public SingleCacheStorage
 
+"""
+    DictCacheStorage()
+
+Storage for the `DictCache()` fallback mode.
+
+`DictCacheStorage` stores fallback `FunctionWrappers.FunctionWrapper`s keyed by
+argument tuple type. Use this type when constructing or inspecting a
+`FunctionWrappersWrapper` whose fallback path should reuse wrappers for several
+different fallback argument tuple types.
+
+# Examples
+
+```julia
+using FunctionWrappersWrappers
+
+wrapper = FunctionWrappersWrapper(sin, (Tuple{Float64},), (Float64,);
+    cache = DictCache(), policy = AllowAll())
+storage = FunctionWrappersWrappers.DictCacheStorage()
+```
+
+# Fields
+- `cache`: Mapping from fallback argument tuple type to cached fallback wrapper.
+
+# Returns
+- `DictCacheStorage`: Empty dictionary-backed storage for fallback wrappers.
+"""
 struct DictCacheStorage
     cache::Dict{DataType, Any}
     DictCacheStorage() = new(Dict{DataType, Any}())
 end
+
+@public NoCacheStorage, SingleCacheStorage, DictCacheStorage
 
 _make_cache_storage(::NoCache) = NoCacheStorage()
 _make_cache_storage(::SingleCache) = SingleCacheStorage()
