@@ -2,7 +2,6 @@ module FunctionWrappersWrappers
 
 using FunctionWrappers: FunctionWrappers
 using SciMLPublic: @public
-import TruncatedStacktraces
 
 export FunctionWrappersWrapper, unwrap, wrapped_signatures, wrapped_return_types
 export NoCache, SingleCache, DictCache
@@ -222,8 +221,6 @@ struct FunctionWrappersWrapper{FW, P, CS}
         return new{FW, P, CS}(fw, cs)
     end
 end
-
-TruncatedStacktraces.@truncate_stacktrace FunctionWrappersWrapper
 
 """
     FunctionWrappersWrapper{FW, P, CS}(f) -> FunctionWrappersWrapper{FW, P, CS}
