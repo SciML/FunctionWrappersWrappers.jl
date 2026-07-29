@@ -222,6 +222,50 @@ struct FunctionWrappersWrapper{FW, P, CS}
     end
 end
 
+@doc """
+    FunctionWrappersWrapper{FW, P, CS}(fw, cs) -> FunctionWrappersWrapper{FW, P, CS}
+
+Create a `FunctionWrappersWrapper` from an already-built wrapper tuple and cache storage,
+with every type parameter fixed by the caller.
+
+This is the fully explicit form. Prefer it when the result type must be inferrable from
+type parameters alone: `FW`, `P` and `CS` are given directly rather than derived from
+argument values, so nothing rests on constant propagation through a keyword-argument
+frame. Solver stacks that wrap a type-erased callable — where the wrapper type, and every
+cache built from it, must stay concrete — construct through this method.
+
+The caller is responsible for consistency: `fw` must match `FW`, and `cs` must be the
+storage type `P`'s fallback path expects — [`NoCacheStorage`](@ref),
+[`SingleCacheStorage`](@ref), or [`DictCacheStorage`](@ref), matching the intended cache
+mode.
+
+# Arguments
+- `fw`: Tuple of `FunctionWrappers.FunctionWrapper`s, tried in order on call.
+- `cs`: Cache storage instance used by the fallback path.
+
+# Type Parameters
+- `FW`: Tuple type of the wrapped `FunctionWrapper`s.
+- `P`: Fallback policy type, such as `Strict`, `AllowAll`, or `AllowNonIsBits`.
+- `CS`: Cache storage type, matching `typeof(cs)`.
+
+# Returns
+- `FunctionWrappersWrapper{FW, P, CS}`: A callable wrapper around `fw`.
+
+# Examples
+```jldoctest
+julia> using FunctionWrappers: FunctionWrapper
+
+julia> fw = (FunctionWrapper{Float64, Tuple{Float64, Float64}}(+),);
+
+julia> cs = FunctionWrappersWrappers.SingleCacheStorage();
+
+julia> fww = FunctionWrappersWrapper{typeof(fw), AllowNonIsBits, typeof(cs)}(fw, cs);
+
+julia> fww(1.0, 2.0)
+3.0
+```
+""" FunctionWrappersWrapper{FW, P, CS}(fw::FW, cs::CS) where {FW, P, CS}
+
 """
     FunctionWrappersWrapper{FW, P, CS}(f) -> FunctionWrappersWrapper{FW, P, CS}
 
