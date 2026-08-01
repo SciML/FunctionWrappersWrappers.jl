@@ -2,9 +2,9 @@ module FunctionWrappersWrappersEnzymeExt
 
 using FunctionWrappersWrappers
 using FunctionWrappersWrappers: SingleCacheStorage, DictCacheStorage, NoCacheStorage
-using Enzyme
-using EnzymeCore
-using EnzymeCore.EnzymeRules
+using Enzyme: Enzyme
+using EnzymeCore: EnzymeCore, BatchDuplicated, Const, Duplicated, Forward, ForwardWithPrimal
+using EnzymeCore.EnzymeRules: EnzymeRules
 
 # =============================================================================
 # Mark cache-storage types as inactive
@@ -17,9 +17,9 @@ using EnzymeCore.EnzymeRules
 # refuses to prove the captured argument read-only. The cache values are
 # `FunctionWrapper`s used purely for dispatch / dynamic call speedup; they
 # never hold derivative data.
-EnzymeCore.EnzymeRules.inactive_type(::Type{<:SingleCacheStorage}) = true
-EnzymeCore.EnzymeRules.inactive_type(::Type{<:DictCacheStorage}) = true
-EnzymeCore.EnzymeRules.inactive_type(::Type{NoCacheStorage}) = true
+EnzymeRules.inactive_type(::Type{<:SingleCacheStorage}) = true
+EnzymeRules.inactive_type(::Type{<:DictCacheStorage}) = true
+EnzymeRules.inactive_type(::Type{NoCacheStorage}) = true
 
 # =============================================================================
 # Helper: build a Forward mode from FwdConfig flags
