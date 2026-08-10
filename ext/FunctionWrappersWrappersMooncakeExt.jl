@@ -57,10 +57,8 @@ function Mooncake.frule!!(::Dual{typeof(unwrap)}, fww::Dual{<:FunctionWrappersWr
     return Dual(f_orig, zero_tangent(f_orig))
 end
 
-# Cache derived rules by signature, mirroring Mooncake's own DynamicRRule/DynamicFRule
-# (src/interpreter/{reverse,forward}_mode.jl): f_orig gets called once per ODE timestep, so
-# rebuilding (and re-locking Mooncake's internal rule cache) on every call would be wasted
-# work once the signature has stabilised.
+# Cache derived rules by signature: f_orig gets called once per ODE timestep, so rebuilding
+# one from scratch on every call would be wasted work once the signature has stabilised.
 const _CALL_RRULE_CACHE = Dict{Any, Any}()
 const _CALL_FRULE_CACHE = Dict{Any, Any}()
 
