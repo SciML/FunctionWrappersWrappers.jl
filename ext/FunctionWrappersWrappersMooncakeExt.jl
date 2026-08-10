@@ -16,49 +16,63 @@ using Mooncake:
     get_interpreter,
     ForwardMode
 
-# Make calling a FunctionWrappersWrapper a Mooncake primitive.
-# Instead of differentiating through the FunctionWrapper dispatch machinery
-# (which fails because the tuple of differently-typed FunctionWrappers produces
-# incompatible FunctionWrapperTangent types), unwrap to the original function
-# and differentiate through that directly.
+# Unwrap to the original function and differentiate through that, rather than the
+# FunctionWrapper dispatch machinery, which fails on mismatched FunctionWrapperTangent
+# types when the tuple holds differently-typed wrappers.
 
 @is_primitive MinimalCtx Tuple{<:FunctionWrappersWrapper, Vararg}
 
-# `unwrap` reaches directly into a nested `FunctionWrapper`'s internal `.obj` field
-# (bypassing the call/construct interface entirely), which the generic `lgetfield` rule
-# cannot handle here: it's constrained to `StandardTangentType`/`StandardFDataType`, and
-# `FunctionWrapper`'s custom `FunctionWrapperTangent` isn't one. This matters for
-# forward-over-reverse (HVP): computing a derivative of `rrule!!`/`frule!!` above requires
-# tracing their own bodies, including this `unwrap` call, in forward mode. Since we already
-# always rebuild a fresh `zero_tangent` for the unwrapped function in the rules above
-# (never actually reading any tangent carried by the wrapper itself, consistent with
-# `FunctionWrappersWrapper`'s own tangent being `NoTangent`), treating `unwrap` as an
-# opaque primitive with the same "fresh zero tangent" behaviour is exact, not an
-# approximation.
+# unwrap reaches into FunctionWrapper's internal .obj field directly, which the generic
+# getfield rule can't handle since FunctionWrapperTangent isn't a StandardTangentType.
+# Also needed for HVP: forward-mode has to trace through this call when differentiating
+# the rrule!!/frule!! above.
 @is_primitive MinimalCtx Tuple{typeof(unwrap), <:FunctionWrappersWrapper}
+
+# Every rule below builds a fresh zero tangent/dual for the unwrapped function rather than
+# threading through any tangent it might really carry. That's exact only if the unwrapped
+# function is genuinely non-differentiable (e.g. a stateless closure); if it carries real
+# state (e.g. a struct field holding a learnable Matrix), silently zeroing it would give a
+# wrong, too-small gradient instead of an error. Fail loud instead.
+function _check_wrapped_fn_has_no_tangent(f_orig)
+    Mooncake.tangent_type(typeof(f_orig)) === NoTangent && return nothing
+    return error(
+        "Differentiating through a FunctionWrappersWrapper whose wrapped function " *
+            "itself carries differentiable state (tangent_type = " *
+            "$(Mooncake.tangent_type(typeof(f_orig)))) is not supported: only " *
+            "gradients flowing through the call arguments are tracked here, not " *
+            "through the wrapped function's own fields.",
+    )
+end
 
 function Mooncake.rrule!!(::CoDual{typeof(unwrap)}, fww::CoDual{<:FunctionWrappersWrapper})
     f_orig = unwrap(fww.x)
+    _check_wrapped_fn_has_no_tangent(f_orig)
     unwrap_pb(::NoRData) = (NoRData(), NoRData())
     return CoDual(f_orig, fdata(zero_tangent(f_orig))), unwrap_pb
 end
 
 function Mooncake.frule!!(::Dual{typeof(unwrap)}, fww::Dual{<:FunctionWrappersWrapper})
     f_orig = unwrap(primal(fww))
+    _check_wrapped_fn_has_no_tangent(f_orig)
     return Dual(f_orig, zero_tangent(f_orig))
 end
+
+# Cache derived rules by signature, mirroring Mooncake's own DynamicRRule/DynamicFRule
+# (src/interpreter/{reverse,forward}_mode.jl): f_orig gets called once per ODE timestep, so
+# rebuilding (and re-locking Mooncake's internal rule cache) on every call would be wasted
+# work once the signature has stabilised.
+const _CALL_RRULE_CACHE = Dict{Any, Any}()
+const _CALL_FRULE_CACHE = Dict{Any, Any}()
 
 function Mooncake.rrule!!(
         f::CoDual{<:FunctionWrappersWrapper}, args::Vararg{CoDual},
     )
     f_orig = unwrap(f.x)
-    # Build a derived rule for calling the unwrapped function with these arg types.
-    # We can't use rrule!! directly since the unwrapped function (e.g. SciMLBase.Void)
-    # is generally not a Mooncake primitive — it needs a derived (compiled) rule.
+    _check_wrapped_fn_has_no_tangent(f_orig)
+    # The unwrapped function usually isn't a Mooncake primitive, so build a derived rule.
     sig = Tuple{typeof(f_orig), map(Core.Typeof ∘ Mooncake.primal, args)...}
-    rule = Mooncake.build_rrule(sig)
-    # Use fdata to get the correct tangent component for the CoDual — zero_tangent
-    # returns NoTangent for singleton callables but derived rules expect NoFData.
+    rule = get!(() -> Mooncake.build_rrule(sig), _CALL_RRULE_CACHE, sig)
+    # fdata turns zero_tangent's NoTangent into the NoFData a derived rule expects.
     f_orig_codual = CoDual(f_orig, fdata(zero_tangent(f_orig)))
     y, pb = rule(f_orig_codual, args...)
     fww_pb(dy) = (NoRData(), Base.tail(pb(dy))...)
@@ -69,27 +83,15 @@ function Mooncake.frule!!(
         f::Dual{<:FunctionWrappersWrapper}, args::Vararg{Dual},
     )
     f_orig = unwrap(primal(f))
-    # Mirrors the rrule!! above: build a derived forward-mode rule for the unwrapped
-    # function with these arg types, rather than differentiating through the
-    # FunctionWrappersWrapper dispatch machinery itself.
+    _check_wrapped_fn_has_no_tangent(f_orig)
+    # Mirrors the rrule!! above, but builds a derived forward-mode rule instead.
     sig = Tuple{typeof(f_orig), map(Core.Typeof ∘ primal, args)...}
-    rule = build_frule(get_interpreter(ForwardMode), sig)
+    rule = get!(() -> build_frule(get_interpreter(ForwardMode), sig), _CALL_FRULE_CACHE, sig)
     f_orig_dual = Dual(f_orig, zero_tangent(f_orig))
     return rule(f_orig_dual, args...)
 end
 
-# FunctionWrappersWrapper is not differentiable data itself — the wrapped function
-# is what carries the derivative information, and we handle that in the rrule above.
+# The wrapper itself carries no derivative info; the wrapped function does, handled above.
 Mooncake.tangent_type(::Type{<:FunctionWrappersWrapper}) = NoTangent
-
-# For the same reason, `prepare_pullback_cache`/`value_and_pullback!!`'s generic
-# "no pointers or aliased mutable state reachable from the output" safety check
-# (SciML/SciMLSensitivity.jl#1424) has nothing to protect against here either: its
-# `.fw` field holds raw-`Ptr`-carrying `FunctionWrapper`s and its `.cache_storage`
-# field is mutable, shared cache state that can legitimately be aliased across
-# multiple places in a returned value (e.g. an `ODESolution`) — but neither is ever
-# reached via generic field access during real differentiation, only via the
-# dedicated `rrule!!`/`unwrap` path above. Stop the check's recursion here.
-Mooncake.__exclude_unsupported_output_internal!(::FunctionWrappersWrapper, ::Set{UInt}) = nothing
 
 end
