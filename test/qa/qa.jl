@@ -21,10 +21,10 @@ run_qa(
         # (`value_and_gradient!!`, `prepare_gradient_cache`, `Config`, `Dual`, ...).
         # Its whole rule-authoring interface — the thing an extension that teaches
         # Mooncake about a new callable has to use — is documented but not `public`:
-        # `build_rrule`, `rrule!!`, `tangent_type` and `primal` below, plus the
-        # explicitly-imported names in the matching list. There is no public spelling
-        # for writing a Mooncake rule, so these stay ignored until Mooncake marks its
-        # rule API `public`.
+        # `build_rrule`, `rrule!!`, `frule!!`, `tangent_type` and `primal` below, plus
+        # the explicitly-imported names in the matching list. There is no public
+        # spelling for writing a Mooncake rule, so these stay ignored until Mooncake
+        # marks its rule API `public`.
         #
         # `Core.Typeof` is the standard idiom for building a call-signature tuple type
         # (`typeof` is wrong for arguments that are themselves types); `Core` does not
@@ -40,14 +40,14 @@ run_qa(
             ignore = (
                 :FunctionWrapper,
                 :augmented_primal, :forward, :inactive_type, :reverse, :strong_zero,
-                :build_rrule, :primal, Symbol("rrule!!"), :tangent_type,
+                :build_rrule, :primal, Symbol("rrule!!"), Symbol("frule!!"), :tangent_type,
                 :Typeof,
             ),
         ),
         all_explicit_imports_are_public = (;
             ignore = (
                 Symbol("@is_primitive"), :CoDual, :MinimalCtx, :NoRData, :NoTangent,
-                :fdata, :zero_tangent,
+                :fdata, :zero_tangent, :build_frule, :primal,
             ),
         ),
     ),

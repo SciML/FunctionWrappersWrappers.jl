@@ -12,9 +12,7 @@ using Mooncake:
     NoTangent,
     fdata,
     primal,
-    build_frule,
-    get_interpreter,
-    ForwardMode
+    build_frule
 
 # Unwrap to the original function and differentiate through that, rather than the
 # FunctionWrapper dispatch machinery, which fails on mismatched FunctionWrapperTangent
@@ -82,10 +80,14 @@ function Mooncake.frule!!(
     )
     f_orig = unwrap(primal(f))
     _check_wrapped_fn_has_no_tangent(f_orig)
-    # Mirrors the rrule!! above, but builds a derived forward-mode rule instead.
-    sig = Tuple{typeof(f_orig), map(Core.Typeof ∘ primal, args)...}
-    rule = get!(() -> build_frule(get_interpreter(ForwardMode), sig), _CALL_FRULE_CACHE, sig)
     f_orig_dual = Dual(f_orig, zero_tangent(f_orig))
+    # Mirrors the rrule!! above, but builds a derived forward-mode rule instead. `sig` is
+    # only used as the cache key here; the rule itself is built via `build_frule`'s
+    # args-based convenience method (mirroring `build_rrule(sig)`'s use above, just with
+    # actual values instead of a signature type -- this form doesn't need `get_interpreter`
+    # /`ForwardMode` imported at all, since it extracts the interpreter internally).
+    sig = Tuple{typeof(f_orig), map(Core.Typeof ∘ primal, args)...}
+    rule = get!(() -> build_frule(f_orig_dual, args...), _CALL_FRULE_CACHE, sig)
     return rule(f_orig_dual, args...)
 end
 
