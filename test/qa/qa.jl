@@ -1,4 +1,4 @@
-using SciMLTesting, FunctionWrappersWrappers
+using SciMLTesting, FunctionWrappersWrappers, JET
 
 # ExplicitImports only sees an extension module once its triggers are loaded
 # (`Base.get_extension` returns `nothing` otherwise), so loading the weakdeps here
@@ -8,6 +8,7 @@ using Enzyme, EnzymeCore, Mooncake
 
 run_qa(
     FunctionWrappersWrappers;
+    jet_kwargs = (; mode = :basic),
     ei_kwargs = (;
         # `FunctionWrappers.FunctionWrapper` is not declared `public` in its owning
         # module. It is the type this package exists to wrap: it appears in the
