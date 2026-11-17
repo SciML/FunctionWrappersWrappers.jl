@@ -9,11 +9,10 @@ DocMeta.setdocmeta!(
 makedocs(;
     modules = [FunctionWrappersWrappers],
     authors = "Chris Elrod <elrodc@gmail.com> and contributors",
-    repo = "https://github.com/chriselrod/FunctionWrappersWrappers.jl/blob/{commit}{path}#{line}",
     sitename = "FunctionWrappersWrappers.jl",
     format = Documenter.HTML(;
         prettyurls = get(ENV, "CI", "false") == "true",
-        canonical = "https://chriselrod.github.io/FunctionWrappersWrappers.jl",
+        canonical = "https://docs.sciml.ai/FunctionWrappersWrappers/stable/",
         assets = String[]
     ),
     pages = [
@@ -22,6 +21,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo = "github.com/chriselrod/FunctionWrappersWrappers.jl",
+    repo = "github.com/SciML/FunctionWrappersWrappers.jl",
     devbranch = "main"
 )
